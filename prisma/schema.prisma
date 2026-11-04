@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Utilisateur connecte via OAuth2 Discord
+model User {
+  id             String    @id // ID Discord (snowflake)
+  username       String
+  globalName     String?
+  avatar         String?
+  email          String?
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  guilds         Guild[]
+  apiKeys        ApiKey[]
+}
+
+// Configuration globale de la plateforme (credentials Discord, etc.)
+model AppConfig {
+  id                  String   @id @default("main")
+  discordClientId     String?
+  discordClientSecret String?
+  updatedAt           DateTime @updatedAt
+}
+
+// Un serveur Discord partage par un utilisateur via la plateforme
+model Guild {
+  id              String    @id @default(cuid())
+  discordId       String // ID du serveur Discord
+  name            String
+  icon            String?
+  channelId       String? // salon texte utilise pour creer les invitations
+  channelName     String?
+  ownerId         String
+  owner           User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  memberCount     Int?
+  onlineCount     Int?
+  lastCheckAt     DateTime?
+  lastCheckStatus String? // ok | refreshed | error
+  lastCheckMsg    String?
+  invite          Invite?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([discordId, ownerId])
+}
+
+// Invitation Discord actuellement en vigueur pour un serveur partage
+model Invite {
+  id        String   @id @default(cuid())
+  code      String
+  guildId   String   @unique
+  guild     Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  maxAge    Int      @default(0)
+  maxUses   Int      @default(0)
+  uses      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Cle d'API permettant a un site externe de recuperer les liens
+model ApiKey {
+  id           String    @id @default(cuid())
+  key          String    @unique
+  name         String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastUsedAt   DateTime?
+  requestCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+}
