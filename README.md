@@ -64,6 +64,8 @@ turso db tokens create linkhub     # → TURSO_AUTH_TOKEN
 
 # 2) Créer le schéma (génère le SQL depuis prisma/schema.prisma et l'applique)
 npm run db:sql | turso db shell linkhub
+#    → sans CLI Turso : ouvrez app.turso.tech → votre base → Console,
+#      et collez-y le contenu du fichier turso-schema.sql (fourni à la racine).
 ```
 
 Puis définissez ces variables partout où l'app tourne (Render, etc.) :
@@ -76,6 +78,8 @@ TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIs...
 Tant que `TURSO_DATABASE_URL` n'est pas défini, l'app retombe sur le fichier local — même code, zéro configuration. Pour éviter le throttle sur le plan gratuit de Turso, créez la base **proche de votre hébergement** (ex. région `fra` ou `cdg` pour Render Europe) : `turso db create linkhub --location cdg`.
 
 > Le CLI Prisma ne parle pas à Turso directement : `npm run db:push` vise le fichier local, et `npm run db:sql` régénère le SQL complet à appliquer avec `turso db shell` (ou la console web Turso) après chaque évolution du schéma.
+
+**⚠️ Étape 2 est OBLIGATOIRE.** Sans schéma, l'app démarre quand même mais chaque écriture échoue. Symptôme typique : le bouton « Enregistrer » des Réglages renvoie *« Echec — Unexpected end of JSON input »* (un 500 sans corps). Diagnostic en une URL : ouvrez **`https://votre-app/api/health`** — s'il affiche `no such table`, le schéma n'est pas appliqué ; s'il affiche `{"status":"ok","database":"ok"}`, la base est prête.
 
 ## 4. Déploiement sur Render
 

@@ -6,7 +6,10 @@
 // Base de l'API Discord (remplacable par un serveur de test via DISCORD_API_BASE)
 export const DISCORD_API = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10'
 
-export const DISCORD_SCOPES = ['identify', 'guilds', 'guilds.invites_create'].join(' ')
+// Scopes OAuth valides chez Discord : identify (profil) + guilds (liste des serveurs).
+// La creation d'invitation n'a pas de scope dedie : la permission CREATE_INVITE
+// du membre sur le canal suffit avec le token utilisateur.
+export const DISCORD_SCOPES = ['identify', 'guilds'].join(' ')
 
 // Bits de permissions Discord
 export const PERM_ADMINISTRATOR = 0x8n

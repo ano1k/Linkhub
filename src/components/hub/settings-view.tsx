@@ -34,8 +34,20 @@ export function SettingsView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, clientSecret }),
       })
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      // Lecture tolérante : un 500 vide (proxy/process) ne doit pas crasher le JSON.parse
+      const raw = await res.text()
+      let payload: { error?: string } = {}
+      try {
+        payload = raw ? JSON.parse(raw) : {}
+      } catch {
+        payload = {}
+      }
+      if (!res.ok) {
+        throw new Error(
+          payload.error ||
+            `Erreur serveur HTTP ${res.status}${raw ? ` : ${raw.slice(0, 200)}` : ' (reponse vide)'} — regarde /api/health et les logs du serveur.`,
+        )
+      }
       setSaved(true)
       toast({
         title: 'Configuration enregistree',

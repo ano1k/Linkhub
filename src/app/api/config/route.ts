@@ -51,11 +51,23 @@ export async function POST(req: Request) {
     }
   }
 
-  await db.appConfig.upsert({
-    where: { id: 'main' },
-    create: { id: 'main', discordClientId: clientId, discordClientSecret: clientSecret },
-    update: { discordClientId: clientId, discordClientSecret: clientSecret },
-  })
+  try {
+    await db.appConfig.upsert({
+      where: { id: 'main' },
+      create: { id: 'main', discordClientId: clientId, discordClientSecret: clientSecret },
+      update: { discordClientId: clientId, discordClientSecret: clientSecret },
+    })
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'Erreur inconnue'
+    const hint = /no such table|does not exist/i.test(detail)
+      ? "La base n'est pas initialisee : applique le schema (npm run db:sql | turso db shell <base>, ou colle turso-schema.sql dans la console web Turso)."
+      : 'Verifie TURSO_DATABASE_URL et TURSO_AUTH_TOKEN, puis l\'etat de la base sur /api/health.'
+    console.error('[config] echec enregistrement :', detail)
+    return Response.json(
+      { error: `Ecriture en base impossible : ${detail}. ${hint}` },
+      { status: 500 },
+    )
+  }
 
   return Response.json({ ok: true, discordConfigured: true })
 }

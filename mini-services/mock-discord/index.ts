@@ -75,7 +75,7 @@ async function handler(req: Request): Promise<Response> {
       access_token: `at_${++tokenCounter}`,
       refresh_token: `rt_${tokenCounter}`,
       expires_in: 604800,
-      scope: 'identify guilds guilds.invites_create',
+      scope: 'identify guilds',
     })
   }
 
