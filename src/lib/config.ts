@@ -16,6 +16,16 @@ export function redirectRelative(location: string, status = 307): NextResponse {
 }
 
 /**
+ * Variante avec Response brute : NextResponse dedoublonne les Set-Cookie de meme nom
+ * (son store interne garde une seule entree par cookie), ce qui empeche d'ecrire les
+ * deux variantes (Partitioned / non partitionnee) du cookie de session en une reponse.
+ * Undici preserve les Set-Cookie multiples sur une Response standard.
+ */
+export function redirectRaw(location: string, status = 307): Response {
+  return new Response(null, { status, headers: { Location: location } })
+}
+
+/**
  * Determine le protocole public vu par le navigateur.
  * Chaine typique : navigateur (https) -> passerelle externe (termine le TLS, parle http)
  * -> Caddy :81 (ecrase X-Forwarded-Proto avec "http") -> Next.js.

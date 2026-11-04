@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BookOpen, FlaskConical, KeyRound, LogOut, Radio, Server, Settings } from 'lucide-react'
+import { BookOpen, FlaskConical, KeyRound, LogOut, Radio, Server, Settings, Users } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -117,6 +117,15 @@ export function Dashboard({
               Mode demo
             </Badge>
           )}
+          <a href="/serveurs" target="_blank" rel="noreferrer" className="hidden md:block" title="Voir tous les serveurs partages sur la plateforme">
+            <Badge
+              variant="outline"
+              className="border-primary/30 text-muted-foreground gap-1.5 cursor-pointer hover:text-foreground"
+            >
+              <Users className="h-3 w-3" />
+              Annuaire
+            </Badge>
+          </a>
           <div className="ml-auto flex items-center gap-3">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium leading-tight">{displayName}</p>

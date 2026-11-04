@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Maximize2, Settings } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Maximize2, Settings, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Landing } from '@/components/hub/landing'
@@ -122,6 +122,14 @@ export default function Home() {
                     <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
                   )}
                 </Button>
+              )}
+              {publicView === 'landing' && (
+                <a href="/serveurs">
+                  <Button variant="outline" className="gap-2">
+                    <Users className="h-4 w-4" />
+                    Annuaire
+                  </Button>
+                </a>
               )}
               {publicView === 'landing' && (
                 <a href="/api/auth/discord">

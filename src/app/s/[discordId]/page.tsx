@@ -176,8 +176,11 @@ export default async function PublicGuildPage({ params, searchParams }: Props) {
               Partage ton propre serveur Discord avec un lien comme celui-ci sur{' '}
               <a href="/" className="text-primary hover:underline">
                 LinkHub
+              </a>{' '}
+              ·{' '}
+              <a href="/serveurs" className="text-primary hover:underline">
+                Voir tous les serveurs
               </a>
-              .
             </p>
           </div>
         )}

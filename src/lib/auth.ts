@@ -4,7 +4,15 @@ import { db } from '@/lib/db'
 import { detectPublicProto, isMockMode } from '@/lib/config'
 import type { User } from '@prisma/client'
 
-const SESSION_COOKIE = 'dlh_session'
+/**
+ * _v2 : nouveau nom de cookie. L'ancien nom (dlh_session) a pose probleme : selon la
+ * version du site, le cookie pouvait exister en deux "identites" dans le navigateur
+ * (Partitioned / non partitionnee), et Next.js ne peut emitter qu'un seul Set-Cookie
+ * par nom — on ne remplacait donc qu'une identite par reconnexion, d'ou l'impossibilite
+ * de changer de compte Discord. Avec un nom neuf, une seule identite existe : l'ecriture
+ * et la suppression visent toujours la bonne, et les anciens cookies deviennent inertes.
+ */
+const SESSION_COOKIE = 'dlh_session_v2'
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30 // 30 jours
 
 /**
@@ -12,11 +20,18 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30 // 30 jours
  * (qui passe par discord.com) et a l'affichage dans un apercu integre (iframe) :
  * SameSite=None + Secure (+ Partitioned pour les navigateurs a CHIPS).
  * En http local, SameSite=None est rejete : on utilise Lax.
+ *
+ * IMPORTANT : on ecrit TOUTES les variantes du cookie (Partitioned ET non partitionnee).
+ * Si une ancienne variante subsiste dans le navigateur (ex : cookie pose par une
+ * version precedente du site), les deux coexistent et le navigateur envoie les deux ;
+ * ne remplacer qu'une seule garderait l'ancienne session active (impossible de
+ * changer de compte Discord). Ecrire les deux ecrase n'importe quelle variante.
  */
-function cookieOptions(isHttps: boolean) {
+function sessionCookieStrings(value: string, maxAge: number, isHttps: boolean): string[] {
+  const base = `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; Max-Age=${maxAge}`
   return isHttps
-    ? { httpOnly: true, secure: true, sameSite: 'none' as const, partitioned: true, path: '/' }
-    : { httpOnly: true, secure: false, sameSite: 'lax' as const, path: '/' }
+    ? [`${base}; Secure; SameSite=None`, `${base}; Secure; SameSite=None; Partitioned`]
+    : [`${base}; SameSite=Lax`]
 }
 
 function isHttpsRequest(req: Request): boolean {
@@ -48,24 +63,31 @@ export function parseSessionValue(raw: string | undefined | null): string | null
   return userId
 }
 
-export async function setSessionCookie(userId: string, req?: Request): Promise<void> {
-  const store = await cookies()
+export function setSessionCookie(res: Response, userId: string, req?: Request): void {
   const isHttps = req ? isHttpsRequest(req) : false
-  store.set(SESSION_COOKIE, createSessionValue(userId), {
-    ...cookieOptions(isHttps),
-    maxAge: SESSION_MAX_AGE,
-  })
+  for (const cookie of sessionCookieStrings(createSessionValue(userId), SESSION_MAX_AGE, isHttps)) {
+    res.headers.append('set-cookie', cookie)
+  }
 }
 
-export async function clearSessionCookie(): Promise<void> {
-  const store = await cookies()
-  store.set(SESSION_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 })
+export function clearSessionCookie(res: Response, req?: Request): void {
+  const isHttps = req ? isHttpsRequest(req) : false
+  for (const cookie of sessionCookieStrings('', 0, isHttps)) {
+    res.headers.append('set-cookie', cookie)
+  }
 }
 
 /** Renvoie l'utilisateur connecte, ou null. */
 export async function getSessionUser(): Promise<User | null> {
   const store = await cookies()
-  const userId = parseSessionValue(store.get(SESSION_COOKIE)?.value)
+  // Plusieurs cookies de session peuvent coexister (variantes Partitioned / legacy) :
+  // le navigateur les envoie du plus ancien au plus recent, on retient le DERNIER
+  // valide, c'est-a-dire celui de la connexion la plus recente.
+  let userId: string | null = null
+  for (const cookie of store.getAll(SESSION_COOKIE)) {
+    const parsed = parseSessionValue(cookie.value)
+    if (parsed) userId = parsed
+  }
   if (!userId) return null
   try {
     return await db.user.findUnique({ where: { id: userId } })
