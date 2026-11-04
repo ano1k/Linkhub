@@ -21,6 +21,7 @@ export function SettingsView({
   const [clientSecret, setClientSecret] = useState('')
   const [botToken, setBotToken] = useState('')
   const [saving, setSaving] = useState(false)
+  const [savingBot, setSavingBot] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -69,6 +70,47 @@ export function SettingsView({
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Enregistre le Bot Token seul, sans toucher aux identifiants de l'application.
+  const saveBot = async () => {
+    const token = botToken.trim()
+    if (!token) return
+    setSavingBot(true)
+    try {
+      const res = await fetch('/api/config/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ botToken: token }),
+      })
+      const raw = await res.text()
+      let payload: { error?: string } = {}
+      try {
+        payload = raw ? JSON.parse(raw) : {}
+      } catch {
+        payload = {}
+      }
+      if (!res.ok) {
+        throw new Error(
+          payload.error ||
+            `Erreur serveur HTTP ${res.status}${raw ? ` : ${raw.slice(0, 200)}` : ' (reponse vide)'}.`,
+        )
+      }
+      setBotToken('')
+      toast({
+        title: 'Bot enregistre',
+        description: 'Le bot peut maintenant lister les salons et creer les invitations.',
+      })
+      onSaved()
+    } catch (e) {
+      toast({
+        title: 'Echec',
+        description: e instanceof Error ? e.message : 'Erreur inconnue',
+        variant: 'destructive',
+      })
+    } finally {
+      setSavingBot(false)
     }
   }
 
@@ -208,7 +250,9 @@ export function SettingsView({
               id="bot-token"
               type="password"
               placeholder={
-                config?.botConfigured ? 'Deja configure — laisse vide pour conserver' : 'Colle ton Bot Token ici'
+                config?.botConfigured
+                  ? 'Deja configure — colle un nouveau token ici pour le remplacer'
+                  : 'Colle ton Bot Token ici'
               }
               value={botToken}
               onChange={(e) => setBotToken(e.target.value)}
@@ -221,6 +265,10 @@ export function SettingsView({
               creer les invitations permanentes sur les serveurs ou le bot a ete ajoute.
             </p>
           </div>
+          <Button onClick={saveBot} disabled={savingBot || !botToken.trim()} className="gap-2 w-fit">
+            {savingBot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Enregistrer le bot
+          </Button>
           {config?.addBotUrl && (
             <a href={config.addBotUrl} target="_blank" rel="noreferrer">
               <Button variant="outline" className="gap-2">

@@ -83,10 +83,11 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
   let botToken = process.env.DISCORD_BOT_TOKEN || ''
   if (isMockMode()) {
     const row = await db.appConfig.findUnique({ where: { id: 'main' } }).catch(() => null)
+    if (row?.discordBotToken) botToken = row.discordBotToken
     if (row?.discordClientId && row?.discordClientSecret) {
       return { clientId: row.discordClientId, clientSecret: row.discordClientSecret, botToken }
     }
-    return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret', botToken: '' }
+    return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret', botToken }
   }
   let clientId = process.env.DISCORD_CLIENT_ID || ''
   let clientSecret = process.env.DISCORD_CLIENT_SECRET || ''
