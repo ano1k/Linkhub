@@ -80,6 +80,17 @@ export async function GET() {
 
 // POST /api/dashboard/guilds -> partage un serveur { discordId, channelId, channelName }
 export async function POST(req: Request) {
+  try {
+    return await shareGuild(req)
+  } catch (e) {
+    // Jamais de corps vide : le client doit toujours recevoir un JSON exploitable
+    const detail = e instanceof Error ? e.message : 'Erreur inconnue'
+    console.error('[guilds:share]', detail)
+    return Response.json({ error: `Partage impossible : ${detail}` }, { status: 500 })
+  }
+}
+
+async function shareGuild(req: Request) {
   const user = await getSessionUser()
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
@@ -115,12 +126,19 @@ export async function POST(req: Request) {
     )
   }
 
-  // Cree l'invitation permanente sur le salon choisi
-  const invite = await createChannelInvite(token, channelId).catch((e) => {
-    throw new Error(
-      `Impossible de creer l'invitation sur ce salon (${e instanceof Error ? e.message : 'erreur Discord'}).`,
+  // Cree l'invitation permanente sur le salon choisi (erreur explicite si Discord refuse)
+  let invite
+  try {
+    invite = await createChannelInvite(token, channelId)
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'erreur Discord'
+    return Response.json(
+      {
+        error: `Impossible de creer l'invitation sur ce salon (${detail}). Verifie que tu as la permission « Creer une invitation » sur ce salon, ou choisis un autre salon.`,
+      },
+      { status: 400 },
     )
-  })
+  }
 
   const row = await db.guild.upsert({
     where: { discordId_ownerId: { discordId, ownerId: user.id } },

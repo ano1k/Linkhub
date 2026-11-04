@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from '@/hooks/use-toast'
 import { ChannelPickerDialog } from './channel-picker'
+import { readJson, responseError } from '@/lib/utils'
 import type { AvailableGuild, ChannelItem, SharedGuild } from './types'
 
 function timeAgo(iso: string | null): string {
@@ -106,8 +107,8 @@ export function ServersView({
           channelName: channel.name,
         }),
       })
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      const payload = await readJson<{ error?: string }>(res)
+      if (!res.ok) throw new Error(responseError(res, payload))
       toast({
         title: 'Serveur partage !',
         description: `Invitation permanente creee sur #${channel.name}. Le suivi toutes les 5 minutes est actif.`,
@@ -127,8 +128,8 @@ export function ServersView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'setChannel', channelId: channel.id, channelName: channel.name }),
       })
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      const payload = await readJson<{ error?: string }>(res)
+      if (!res.ok) throw new Error(responseError(res, payload))
       toast({ title: 'Salon mis a jour', description: `Nouvelle invitation creee sur #${channel.name}.` })
       onChanged()
     } finally {
@@ -148,8 +149,8 @@ export function ServersView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'regenerate' }),
       })
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      const payload = await readJson<{ error?: string }>(res)
+      if (!res.ok) throw new Error(responseError(res, payload))
       toast({ title: 'Invitation regeneree', description: 'Une nouvelle invitation permanente a ete creee.' })
       onChanged()
     } catch (e) {
@@ -168,8 +169,8 @@ export function ServersView({
     try {
       const res = await fetch(`/api/dashboard/guilds/${guild.discordId}`, { method: 'DELETE' })
       if (!res.ok) {
-        const payload = await res.json()
-        throw new Error(payload.error || 'Erreur inconnue')
+        const payload = await readJson<{ error?: string }>(res)
+        throw new Error(responseError(res, payload))
       }
       toast({ title: 'Partage retire', description: `Le serveur ${guild.name} n'est plus partage.` })
       onChanged()

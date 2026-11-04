@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from '@/hooks/use-toast'
+import { readJson, responseError } from '@/lib/utils'
 import type { ChannelItem } from './types'
 
 /**
@@ -51,8 +52,8 @@ export function ChannelPickerDialog({
     setSelected(null)
     fetch(`/api/dashboard/guilds/${guildId}/channels`)
       .then(async (res) => {
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Erreur inconnue')
+        const data = await readJson<{ error?: string; channels?: ChannelItem[] }>(res)
+        if (!res.ok) throw new Error(responseError(res, data))
         setChannels(data.channels || [])
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Erreur inconnue'))

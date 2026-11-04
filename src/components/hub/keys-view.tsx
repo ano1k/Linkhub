@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from '@/hooks/use-toast'
+import { readJson, responseError } from '@/lib/utils'
 import type { ApiKeyItem } from './types'
 
 function formatDate(iso: string | null): string {
@@ -55,8 +56,8 @@ export function KeysView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName }),
       })
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      const payload = await readJson<{ error?: string }>(res)
+      if (!res.ok) throw new Error(responseError(res, payload))
       setCreateOpen(false)
       setNewName('')
       toast({ title: 'Cle creee', description: 'Copie-la maintenant : elle est visible dans la liste.' })
@@ -77,8 +78,8 @@ export function KeysView({
     try {
       const res = await fetch(`/api/dashboard/keys/${key.id}`, { method: 'DELETE' })
       if (!res.ok) {
-        const payload = await res.json()
-        throw new Error(payload.error || 'Erreur inconnue')
+        const payload = await readJson<{ error?: string }>(res)
+        throw new Error(responseError(res, payload))
       }
       toast({ title: 'Cle supprimee', description: `${key.name} ne peut plus etre utilisee.` })
       onChanged()

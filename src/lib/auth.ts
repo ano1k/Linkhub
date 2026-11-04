@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto'
 import { cookies } from 'next/headers'
 import { db } from '@/lib/db'
-import { detectPublicProto } from '@/lib/config'
+import { detectPublicProto, isMockMode } from '@/lib/config'
 import type { User } from '@prisma/client'
 
 const SESSION_COOKIE = 'dlh_session'
@@ -77,4 +77,20 @@ export async function getSessionUser(): Promise<User | null> {
 /** Genere une nouvelle cle d'API (prefixe lisible + partie aleatoire). */
 export function generateApiKey(): string {
   return `dlh_${randomBytes(24).toString('hex')}`
+}
+
+/**
+ * Le staff (gestion des Reglages de la plateforme) est defini par la variable
+ * d'environnement STAFF_DISCORD_IDS : IDs Discord separes par des virgules.
+ * En mode demo (Discord simule), tout le monde est staff pour garder le parcours complet.
+ */
+export function isStaffUser(user: { id: string } | null): boolean {
+  if (!user) return false
+  if (isMockMode()) return true
+  const raw = (process.env.STAFF_DISCORD_IDS || '').trim()
+  if (!raw) return false
+  return raw
+    .split(/[,;\s]+/)
+    .filter(Boolean)
+    .includes(user.id)
 }

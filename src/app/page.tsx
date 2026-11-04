@@ -8,6 +8,7 @@ import { Landing } from '@/components/hub/landing'
 import { Dashboard } from '@/components/hub/dashboard'
 import { SettingsView } from '@/components/hub/settings-view'
 import { DiscordIcon } from '@/components/hub/discord-icon'
+import { readJson } from '@/lib/utils'
 import type { AppConfigInfo, SessionUser } from '@/components/hub/types'
 
 type PublicView = 'landing' | 'setup'
@@ -23,8 +24,8 @@ export default function Home() {
   const loadAll = useCallback(async () => {
     try {
       const [cfgRes, meRes] = await Promise.all([fetch('/api/config'), fetch('/api/me')])
-      const cfg = await cfgRes.json()
-      const me = await meRes.json()
+      const cfg = await readJson<AppConfigInfo>(cfgRes)
+      const me = await readJson<{ user: SessionUser | null }>(meRes)
       setConfig(cfg)
       setUser(me.user)
     } catch {
@@ -137,7 +138,9 @@ export default function Home() {
 
       {user ? (
         <Dashboard user={user} config={config} onLogout={handleLogout} onConfigSaved={loadAll} />
-      ) : publicView === 'setup' ? (
+      ) : publicView === 'setup' && !config?.discordConfigured ? (
+        // Une fois la plateforme configuree, les reglages sont reserves au staff
+        // (onglet Reglages du tableau de bord) : la vue publique retourne a l'accueil.
         <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">
           <Button
             variant="ghost"

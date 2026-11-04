@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { getSessionUser } from '@/lib/auth'
+import { getSessionUser, isStaffUser } from '@/lib/auth'
 import {
   buildBaseUrl,
   buildRedirectUri,
@@ -43,9 +43,9 @@ export async function POST(req: Request) {
   const alreadyConfigured = isDiscordConfigured(current)
   if (alreadyConfigured) {
     const user = await getSessionUser()
-    if (!user) {
+    if (!isStaffUser(user)) {
       return Response.json(
-        { error: 'La plateforme est deja configuree : connecte-toi pour modifier les reglages.' },
+        { error: 'Les reglages sont reserves au staff.' },
         { status: 403 },
       )
     }

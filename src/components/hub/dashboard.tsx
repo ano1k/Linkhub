@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { readJson, responseError } from '@/lib/utils'
 import { DiscordIcon } from './discord-icon'
 import { ServersView } from './servers-view'
 import { KeysView } from './keys-view'
@@ -14,8 +15,10 @@ import { SettingsView } from './settings-view'
 import type {
   ApiKeyItem,
   AppConfigInfo,
+  AvailableGuild,
   DashboardGuildsResponse,
   SessionUser,
+  SharedGuild,
 } from './types'
 
 export function Dashboard({
@@ -37,13 +40,18 @@ export function Dashboard({
   const loadGuilds = async () => {
     try {
       const res = await fetch('/api/dashboard/guilds')
-      const payload = await res.json()
+      const payload = await readJson<{
+        error?: string
+        needsReauth?: boolean
+        guilds?: SharedGuild[]
+        available?: AvailableGuild[]
+      }>(res)
       if (res.status === 401 && payload.needsReauth) {
         setNeedsReauth(true)
-        setGuildsError(payload.error)
+        setGuildsError(payload.error ?? null)
         return
       }
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      if (!res.ok) throw new Error(responseError(res, payload))
       setGuildsData({ guilds: payload.guilds || [], available: payload.available || [] })
       setGuildsError(null)
     } catch (e) {
@@ -54,8 +62,8 @@ export function Dashboard({
   const loadKeys = async () => {
     try {
       const res = await fetch('/api/dashboard/keys')
-      const payload = await res.json()
-      if (!res.ok) throw new Error(payload.error || 'Erreur inconnue')
+      const payload = await readJson<{ error?: string; keys?: ApiKeyItem[] }>(res)
+      if (!res.ok) throw new Error(responseError(res, payload))
       setKeys(payload.keys || [])
     } catch {
       setKeys([])
@@ -75,6 +83,9 @@ export function Dashboard({
 
   const displayName = user.globalName || user.username
   const sharedCount = guildsData?.guilds.length ?? 0
+  // Les reglages de la plateforme (application Discord) sont reserves au staff.
+  // Exception : plateforme pas encore configuree => tout le monde peut faire le reglage initial.
+  const canManageSettings = user.isStaff || !config?.discordConfigured
 
   return (
     <div className="flex-1 flex flex-col">
@@ -147,10 +158,12 @@ export function Dashboard({
                 <BookOpen className="h-4 w-4" />
                 Documentation
               </TabsTrigger>
-              <TabsTrigger value="settings" className="gap-1.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                <Settings className="h-4 w-4" />
-                Reglages
-              </TabsTrigger>
+              {canManageSettings && (
+                <TabsTrigger value="settings" className="gap-1.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                  <Settings className="h-4 w-4" />
+                  Reglages
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="servers">
@@ -182,9 +195,11 @@ export function Dashboard({
               />
             </TabsContent>
 
-            <TabsContent value="settings">
-              <SettingsView config={config} onSaved={onConfigSaved} />
-            </TabsContent>
+            {canManageSettings && (
+              <TabsContent value="settings">
+                <SettingsView config={config} onSaved={onConfigSaved} />
+              </TabsContent>
+            )}
           </Tabs>
         )}
       </main>

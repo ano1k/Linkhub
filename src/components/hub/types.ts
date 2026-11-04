@@ -3,6 +3,7 @@ export type SessionUser = {
   username: string
   globalName: string | null
   avatarUrl: string | null
+  isStaff: boolean
 }
 
 export type AppConfigInfo = {

@@ -8,6 +8,17 @@ type Params = { params: Promise<{ discordId: string }> }
 // PATCH /api/dashboard/guilds/[discordId]
 // body: { action: "setChannel" | "regenerate", channelId?, channelName? }
 export async function PATCH(req: Request, { params }: Params) {
+  try {
+    return await patchGuild(req, { params })
+  } catch (e) {
+    // Jamais de corps vide : le client doit toujours recevoir un JSON exploitable
+    const detail = e instanceof Error ? e.message : 'Erreur inconnue'
+    console.error('[guilds:patch]', detail)
+    return Response.json({ error: `Mise a jour impossible : ${detail}` }, { status: 500 })
+  }
+}
+
+async function patchGuild(req: Request, { params }: Params) {
   const user = await getSessionUser()
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
@@ -48,13 +59,19 @@ export async function PATCH(req: Request, { params }: Params) {
     )
   }
 
-  const invite = await createChannelInvite(token, channelId).catch((e) =>
-    Promise.reject(
-      new Error(
-        `Impossible de creer l'invitation (${e instanceof Error ? e.message : 'erreur Discord'}).`,
-      ),
-    ),
-  )
+  // Cree l'invitation permanente (erreur explicite si Discord refuse)
+  let invite
+  try {
+    invite = await createChannelInvite(token, channelId)
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'erreur Discord'
+    return Response.json(
+      {
+        error: `Impossible de creer l'invitation (${detail}). Verifie la permission « Creer une invitation » sur ce salon.`,
+      },
+      { status: 400 },
+    )
+  }
 
   await db.invite.upsert({
     where: { guildId: row.id },
@@ -102,6 +119,16 @@ export async function PATCH(req: Request, { params }: Params) {
 
 // DELETE /api/dashboard/guilds/[discordId] -> arrete le partage
 export async function DELETE(_req: Request, { params }: Params) {
+  try {
+    return await deleteGuild({ params })
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'Erreur inconnue'
+    console.error('[guilds:delete]', detail)
+    return Response.json({ error: `Suppression impossible : ${detail}` }, { status: 500 })
+  }
+}
+
+async function deleteGuild({ params }: Params) {
   const user = await getSessionUser()
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
