@@ -84,6 +84,7 @@ export function ServersView({
   const [rechannelTarget, setRechannelTarget] = useState<SharedGuild | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SharedGuild | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const siteOrigin = typeof window !== 'undefined' ? window.location.origin : ''
 
   const copyLink = async (url: string) => {
     try {
@@ -259,21 +260,53 @@ export function ServersView({
                     </div>
                   </div>
 
-                  <div className="mt-4 rounded-lg bg-black/30 border border-border/60 px-3 py-2 flex items-center gap-2">
-                    <code className="text-xs font-mono text-foreground/80 truncate flex-1" dir="ltr">
-                      {g.inviteUrl || 'Aucune invitation'}
-                    </code>
-                    {g.inviteUrl && (
+                  <div className="mt-4 space-y-2">
+                    <div className="rounded-lg bg-black/30 border border-border/60 px-3 py-2 flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0 w-24">
+                        Invitation
+                      </span>
+                      <code className="text-xs font-mono text-foreground/80 truncate flex-1" dir="ltr">
+                        {g.inviteUrl || 'Aucune invitation'}
+                      </code>
+                      {g.inviteUrl && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 shrink-0"
+                          onClick={() => copyLink(g.inviteUrl!)}
+                          aria-label="Copier le lien d'invitation"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="rounded-lg bg-black/30 border border-border/60 px-3 py-2 flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0 w-24">
+                        Page publique
+                      </span>
+                      <code className="text-xs font-mono text-foreground/80 truncate flex-1" dir="ltr">
+                        {siteOrigin}/s/{g.discordId}
+                      </code>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2"
-                        onClick={() => copyLink(g.inviteUrl!)}
-                        aria-label="Copier le lien d'invitation"
+                        className="h-7 px-2 shrink-0"
+                        onClick={() => copyLink(`${siteOrigin}/s/${g.discordId}`)}
+                        aria-label="Copier le lien de la page publique"
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </Button>
-                    )}
+                      <a
+                        href={`/s/${g.discordId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label="Ouvrir la page publique dans un nouvel onglet"
+                      >
+                        <Button size="sm" variant="ghost" className="h-7 px-2 shrink-0">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Button>
+                      </a>
+                    </div>
                   </div>
 
                   <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">

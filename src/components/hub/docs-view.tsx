@@ -153,6 +153,22 @@ echo 'Invitation indisponible, reessaie plus tard.';`
         <CodeBlock code={htmlButton} lang="html" />
       </section>
 
+      {/* Page de partage publique */}
+      <section className="space-y-4">
+        <h3 className="font-semibold text-lg flex items-center gap-2">
+          <Badge variant="outline" className="font-mono text-xs border-primary/40 text-primary">PAGE</Badge>
+          <code className="font-mono text-sm sm:text-base">/s/{"{discordId}"}</code>
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Chaque serveur partage possede aussi une page publique sur ce site : icone, nom, compteurs
+          de membres et gros bouton &laquo; Rejoindre le serveur &raquo;. Aucune cle, aucun code :
+          parfait a coller dans une bio, un post ou un partenariat. Le lien est affiche dans
+          l&apos;onglet Serveurs (bloc &laquo; Page publique &raquo; de chaque carte). Le bouton de
+          la page passe par <code className="font-mono">/api/join/{"{discordId}"}</code>, une
+          redirection 302 qui sert toujours l&apos;invitation valide du moment.
+        </p>
+      </section>
+
       {/* Integrations */}
       <section className="space-y-4">
         <h3 className="font-semibold text-lg">Integrations completes</h3>
