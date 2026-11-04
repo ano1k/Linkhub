@@ -60,7 +60,11 @@ export async function GET(req: Request) {
     res.headers.append('set-cookie', 'dlh_oauth_state=; Path=/; HttpOnly; Max-Age=0')
     return res
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Erreur inconnue pendant la connexion.'
+    const raw = e instanceof Error ? e.message : 'Erreur inconnue pendant la connexion.'
+    // 401 invalid_client = Client ID/Secret incorrects (souvent saisis dans Reglages)
+    const message = raw.includes('invalid_client')
+      ? "Identifiants Discord refuses (Client ID ou Client Secret incorrect) : ouvre Reglages sur la page d'accueil et corrige-les, puis reconnecte-toi."
+      : raw
     return fail(message)
   }
 }

@@ -99,12 +99,12 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
     }
     return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret', botToken }
   }
-  let clientId = process.env.DISCORD_CLIENT_ID || ''
-  let clientSecret = process.env.DISCORD_CLIENT_SECRET || ''
+  let clientId = (process.env.DISCORD_CLIENT_ID || '').trim()
+  let clientSecret = (process.env.DISCORD_CLIENT_SECRET || '').trim()
   try {
     const row = await db.appConfig.findUnique({ where: { id: 'main' } })
-    if (row?.discordClientId) clientId = row.discordClientId
-    if (row?.discordClientSecret) clientSecret = row.discordClientSecret
+    if (row?.discordClientId) clientId = row.discordClientId.trim()
+    if (row?.discordClientSecret) clientSecret = row.discordClientSecret.trim()
   } catch {
     // base non initialisee : on retombe sur les variables d'environnement
   }

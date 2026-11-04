@@ -199,6 +199,11 @@ export function SettingsView({
               className="font-mono"
               dir="ltr"
             />
+            <p className="text-xs text-muted-foreground">
+              Portail developpeur Discord (discord.com/developers/applications) &gt; ton
+              application &gt; onglet <span className="text-foreground">OAuth2</span> &gt; Client ID
+              (bouton Copy).
+            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="client-secret">Client Secret</Label>
@@ -212,8 +217,9 @@ export function SettingsView({
               dir="ltr"
             />
             <p className="text-xs text-muted-foreground">
-              Il est stocke uniquement dans la base de donnees de ce site et sert uniquement aux
-              connexions OAuth de la plateforme.
+              Meme onglet OAuth2 &gt; Client Secret (bouton Reset si tu l'as perdu). Verifie
+              l'identite de l'application a l'enregistrement : si Discord les refuse, le formulaire
+              te le dira tout de suite.
             </p>
           </div>
           <Button onClick={save} disabled={saving || !clientId || !clientSecret} className="gap-2">

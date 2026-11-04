@@ -56,6 +56,45 @@ export async function POST(req: Request) {
     }
   }
 
+  // Verifie les identifiants aupres de Discord (grant client_credentials) AVANT
+  // d'enregistrer : sinon l'utilisateur decouvre l'erreur plus tard, au moment de
+  // se connecter (401 invalid_client sur l'echange du code).
+  if (!isMockMode()) {
+    try {
+      const check = await fetch('https://discord.com/api/oauth2/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'client_credentials',
+        }).toString(),
+        cache: 'no-store',
+      })
+      if (!check.ok) {
+        // Mauvais Client ID / Secret : Discord repond invalid_client (400 ou 401 selon le cas).
+        let discordError = ''
+        try {
+          discordError = ((await check.json()) as { error?: string })?.error || ''
+        } catch {
+          // pas de corps JSON
+        }
+        if (discordError === 'invalid_client') {
+          return Response.json(
+            {
+              error:
+                'Discord refuse ces identifiants (invalid_client) : le Client ID ou le Client Secret est incorrect. Copie-les depuis le portail developpeur Discord (Application > OAuth2), sans espace avant/apres, puis reessaie.',
+            },
+            { status: 400 },
+          )
+        }
+        // Autre erreur Discord (rate limit...) : on enregistre quand meme.
+      }
+    } catch {
+      // Discord injoignable : on enregistre quand meme, l'erreur resurface a la connexion.
+    }
+  }
+
   try {
     await db.appConfig.upsert({
       where: { id: 'main' },
