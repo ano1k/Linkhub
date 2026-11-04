@@ -83,7 +83,9 @@ Tant que `TURSO_DATABASE_URL` n'est pas défini, l'app retombe sur le fichier lo
 |---|---|
 | Runtime | `Node` |
 | Build Command | `npm install --include=dev && npx prisma generate && npm run build` |
-| Start Command | `node .next/standalone/server.js` |
+| Start Command | `HOSTNAME=0.0.0.0 node .next/standalone/server.js` |
+
+> ⚠️ Le préfixe `HOSTNAME=0.0.0.0` est **obligatoire** : Render définit la variable d'environnement `HOSTNAME` (nom interne de l'instance), et le serveur standalone de Next.js s'y lie au démarrage → `getaddrinfo ENOTFOUND` → le process meurt → **HTTP 502**. Avec `0.0.0.0`, il écoute bien sur toutes les interfaces. (Alternative : ajouter la variable `HOSTNAME=0.0.0.0` dans Environment.)
 
 Variables d'environnement (Environment) :
 
@@ -99,6 +101,7 @@ Notes :
 - **Pas de disque persistant à attacher** : les données vivent chez Turso.
 - **Ne définissez pas `DISCORD_API_BASE`** en production : c'est la variable du mode démo.
 - Le serveur standalone écoute sur `process.env.PORT` (fourni par Render).
+- Si un 502 persiste après le fix, consultez l'onglet **Logs** du service : il contient la trace du crash éventuel.
 
 ## 5. Passer au vrai Discord
 
