@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BookOpen, KeyRound, LogOut, Radio, Server, Settings } from 'lucide-react'
+import { BookOpen, FlaskConical, KeyRound, LogOut, Radio, Server, Settings } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -107,6 +107,16 @@ export function Dashboard({
             <Radio className="h-3 w-3 text-green-500" />
             Verification toutes les 5 min
           </Badge>
+          {config?.mockMode && (
+            <Badge
+              variant="outline"
+              className="border-sky-500/40 text-sky-300 gap-1.5"
+              title="Discord simule : toutes les connexions ouvrent le meme compte de test"
+            >
+              <FlaskConical className="h-3 w-3" />
+              Mode demo
+            </Badge>
+          )}
           <div className="ml-auto flex items-center gap-3">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium leading-tight">{displayName}</p>
@@ -129,6 +139,29 @@ export function Dashboard({
 
       {/* Contenu */}
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        {config?.mockMode && (
+          <div className="mb-6 rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-300 flex items-start gap-3">
+            <FlaskConical className="h-5 w-5 shrink-0 mt-0.5" />
+            <div className="space-y-1.5">
+              <p className="font-medium text-sky-200">Mode demo actif — Discord simule</p>
+              <p className="text-sky-200/80 leading-relaxed">
+                Toute connexion ouvre le <strong className="text-sky-100">meme compte de test</strong> :
+                tout le monde voit donc les memes serveurs, crees pendant les essais. Ce n&apos;est
+                pas ton vrai compte Discord, et ce ne sont pas tes vrais serveurs.
+              </p>
+              <p className="text-sky-200/80 leading-relaxed">
+                Pour que chaque personne se connecte avec <strong className="text-sky-100">son
+                propre compte</strong> et voie <strong className="text-sky-100">ses propres
+                serveurs</strong> : sur Render, ouvre ton service →{' '}
+                <strong className="text-sky-100">Environment</strong> → supprime la variable{' '}
+                <code className="font-mono bg-black/30 px-1 py-0.5 rounded">DISCORD_API_BASE</code> →
+                Save (le site se redéploie tout seul). En local : supprime la ligne du fichier{' '}
+                <code className="font-mono bg-black/30 px-1 py-0.5 rounded">.env</code> et
+                redemarre.
+              </p>
+            </div>
+          </div>
+        )}
         {needsReauth ? (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-6 text-center space-y-4">
             <p className="font-medium text-amber-400">Ta session Discord a expire</p>

@@ -136,14 +136,18 @@ export function SettingsView({
               La connexion, les serveurs, les invitations et le refresh des 5 minutes
               fonctionnent avec un <strong className="text-sky-100">Discord de test</strong> integre
               au site : tout est essayable sans compte reel. Les serveurs affiches
-              (&laquo; Serveur Test Admin &raquo;, etc.) sont fictifs.
+              (&laquo; Serveur Test Admin &raquo;, etc.) sont fictifs, et{' '}
+              <strong className="text-sky-100">toutes les connexions ouvrent le meme compte de
+              test</strong> : c&apos;est pour cela que chaque visiteur voit les memes serveurs.
             </p>
             <p className="text-sky-200/60 text-xs leading-relaxed">
-              Pour connecter le VRAI Discord : supprime la ligne{' '}
-              <code className="font-mono bg-black/30 px-1 py-0.5 rounded">DISCORD_API_BASE</code> du
-              fichier <code className="font-mono bg-black/30 px-1 py-0.5 rounded">.env</code>,
-              redemarre le serveur, puis renseigne ci-dessous les identifiants de ton application
-              Discord (guide juste apres).
+              Pour connecter le VRAI Discord (un compte par personne) : sur Render, ouvre ton
+              service → <strong>Environment</strong> → supprime la variable{' '}
+              <code className="font-mono bg-black/30 px-1 py-0.5 rounded">DISCORD_API_BASE</code> →
+              Save (redéploiement automatique) ; en local, supprime la ligne du fichier{' '}
+              <code className="font-mono bg-black/30 px-1 py-0.5 rounded">.env</code> et redemarre
+              le serveur. Puis renseigne ci-dessous les identifiants de ton application Discord
+              (guide juste apres).
             </p>
           </div>
         </div>
