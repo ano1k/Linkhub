@@ -1,13 +1,8 @@
 import { db } from '@/lib/db'
 import type { Guild, User } from '@prisma/client'
-import {
-  createChannelInvite,
-  fetchInviteMeta,
-  listChannelInvites,
-  listGuildInvites,
-  refreshAccessToken,
-} from '@/lib/discord'
+import { fetchInviteMeta, refreshAccessToken } from '@/lib/discord'
 import { getDiscordConfig } from '@/lib/config'
+import { createInviteSmart } from '@/lib/invite-service'
 
 /**
  * Moteur de rafraichissement : toutes les 5 minutes, chaque serveur partage est verifie.
@@ -56,57 +51,39 @@ export async function refreshGuild(guild: GuildWithRelations): Promise<void> {
     })
   }
 
-  // 1. Token d'accès valide
-  let token: string | null = null
-  try {
-    token = await ensureAccessToken(guild.owner)
-  } catch {
-    token = null
-  }
-  if (!token) {
-    await markError(
-      "Le jeton Discord n'est plus valide : reconnecte-toi depuis le tableau de bord pour relancer le suivi.",
-    )
-    return
-  }
-
-  // 2. Verifie l'invitation actuelle
+  // 1. Verifie l'invitation actuelle via l'endpoint PUBLIC de Discord (aucune auth requise) :
+  //    indépendant de la validite des tokens des utilisateurs.
   let code = guild.invite?.code ?? null
   let uses = guild.invite?.uses ?? 0
   let status: 'ok' | 'refreshed' = 'ok'
   let message = 'Invitation valide.'
 
-  try {
-    if (guild.channelId) {
-      const invites = await listChannelInvites(token, guild.channelId)
-      const current = code ? invites.find((i) => i.code === code) : undefined
-      if (current) {
-        uses = current.uses
-      } else {
-        // L'invitation a disparu (supprimee ou expiree) => recreation automatique
-        const fresh = await createChannelInvite(token, guild.channelId)
-        code = fresh.code
-        uses = 0
-        status = 'refreshed'
-        message = 'Ancienne invitation introuvable : une nouvelle a ete generee automatiquement.'
-      }
-    } else {
-      // Pas de salon configure : on cherche une invitation permanente existante du proprietaire
-      const invites = await listGuildInvites(token, guild.discordId)
-      const mine = invites.find((i) => i.inviter?.id === guild.ownerId && i.max_age === 0)
-      if (mine) {
-        code = mine.code
-        uses = mine.uses
-        status = 'ok'
-        message = 'Invitation permanente existante reutilisee.'
-      } else {
-        await markError('Aucun salon configure : choisis un salon texte dans le tableau de bord.')
-        return
-      }
+  if (code) {
+    try {
+      const meta = await fetchInviteMeta(code)
+      uses = meta.uses ?? uses
+    } catch {
+      // L'invitation a disparu (supprimee manuellement, salon supprime...) => recreation
+      code = null
+      status = 'refreshed'
+      message = 'Ancienne invitation introuvable : une nouvelle a ete generee automatiquement.'
     }
-  } catch (e) {
-    await markError(e instanceof Error ? e.message : 'Erreur Discord inconnue')
-    return
+  }
+
+  // 2. Recree l'invitation si besoin (via le bot du serveur)
+  if (!code) {
+    if (!guild.channelId) {
+      await markError('Aucun salon configure : choisis un salon texte dans le tableau de bord.')
+      return
+    }
+    try {
+      const fresh = await createInviteSmart(guild.discordId, guild.channelId)
+      code = fresh.code
+      uses = 0
+    } catch (e) {
+      await markError(e instanceof Error ? e.message : 'Erreur Discord inconnue')
+      return
+    }
   }
 
   // 3. Compteurs publics (membres / en ligne)

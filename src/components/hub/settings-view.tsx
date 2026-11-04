@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, ExternalLink, FlaskConical, Info, Loader2, Save, ShieldCheck } from 'lucide-react'
+import { Bot, CheckCircle2, ExternalLink, FlaskConical, Info, Loader2, Save, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ export function SettingsView({
 }) {
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
+  const [botToken, setBotToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -32,7 +33,12 @@ export function SettingsView({
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, clientSecret }),
+        body: JSON.stringify({
+          clientId,
+          clientSecret,
+          // champ envoye seulement si saisi : sinon le token existant est conserve
+          ...(botToken.trim() ? { botToken: botToken.trim() } : {}),
+        }),
       })
       // Lecture tolérante : un 500 vide (proxy/process) ne doit pas crasher le JSON.parse
       const raw = await res.text()
@@ -49,6 +55,7 @@ export function SettingsView({
         )
       }
       setSaved(true)
+      setBotToken('')
       toast({
         title: 'Configuration enregistree',
         description: 'La connexion Discord est maintenant activee.',
@@ -170,6 +177,93 @@ export function SettingsView({
         </CardContent>
       </Card>
 
+      {/* Bot Discord : obligatoire pour lister les salons et creer les invitations */}
+      <Card className="bg-card/70 border-border/70">
+        <CardContent className="p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold">Bot Discord — requis pour partager les serveurs</h3>
+          </div>
+          <div
+            className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${
+              config?.botConfigured
+                ? 'border-green-500/30 bg-green-500/10 text-green-400'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+            }`}
+          >
+            {config?.botConfigured ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+            ) : (
+              <Info className="h-4 w-4 shrink-0 mt-0.5" />
+            )}
+            <span>
+              {config?.botConfigured
+                ? 'Bot configure. Sur chaque serveur a partager, clique « Ajouter le bot » dans la liste des salons.'
+                : "Bot non configure : le partage de serveur est bloque. Discord refuse les invitations creees avec un simple compte — il faut un bot membre du serveur."}
+            </span>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="bot-token">Bot Token</Label>
+            <Input
+              id="bot-token"
+              type="password"
+              placeholder={
+                config?.botConfigured ? 'Deja configure — laisse vide pour conserver' : 'Colle ton Bot Token ici'
+              }
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              className="font-mono"
+              dir="ltr"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              Stocke uniquement dans la base de ce site. Il sert uniquement a lister les salons et
+              creer les invitations permanentes sur les serveurs ou le bot a ete ajoute.
+            </p>
+          </div>
+          {config?.addBotUrl && (
+            <a href={config.addBotUrl} target="_blank" rel="noreferrer">
+              <Button variant="outline" className="gap-2">
+                <ExternalLink className="h-4 w-4" />
+                Ajouter le bot a un serveur
+              </Button>
+            </a>
+          )}
+          <ol className="space-y-2 text-sm text-muted-foreground list-none">
+            <li className="flex gap-3">
+              <span className="shrink-0 h-6 w-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">
+                1
+              </span>
+              <span>
+                Portail developpeur Discord &rarr; ton application &rarr; onglet{' '}
+                <strong className="text-foreground">Bot</strong> &rarr;{' '}
+                <strong className="text-foreground">Reset Token</strong> &rarr; copie le token et
+                colle-le ci-dessus.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="shrink-0 h-6 w-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">
+                2
+              </span>
+              <span>
+                Enregistre, puis utilise le bouton{' '}
+                <strong className="text-foreground">Ajouter le bot a un serveur</strong> : Discord
+                te propose tes serveurs, choisis celui a partager et valide.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="shrink-0 h-6 w-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">
+                3
+              </span>
+              <span>
+                Dans l&apos;onglet Serveurs, clique « Partager » : le bot liste les salons et cree
+                l&apos;invitation permanente. Rien d&apos;autre a faire.
+              </span>
+            </li>
+          </ol>
+        </CardContent>
+      </Card>
+
       {/* Guide */}
       <section className="space-y-4">
         <h3 className="font-semibold text-lg">Creer ton application Discord (4 etapes)</h3>
@@ -252,9 +346,9 @@ export function SettingsView({
           <li className="flex items-start gap-2">
             <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
             <span>
-              <strong className="text-foreground">Creation d&apos;invitations</strong> : uniquement sur
-              les serveurs que tu decides de partager, pour generer et maintenir l&apos;invitation
-              permanente.
+              <strong className="text-foreground">Bot sur les serveur partages</strong> : le bot de
+              TON application liste les salons et cree l&apos;invitation permanente, uniquement la
+              ou tu l&apos;as ajoute. Il n&apos;envoie jamais de messages et ne lit aucun contenu.
             </span>
           </li>
         </ul>

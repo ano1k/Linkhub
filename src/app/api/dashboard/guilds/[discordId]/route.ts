@@ -1,7 +1,8 @@
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
 import { ensureAccessToken } from '@/lib/refresher'
-import { createChannelInvite, fetchInviteMeta } from '@/lib/discord'
+import { fetchInviteMeta } from '@/lib/discord'
+import { createInviteSmart, inviteErrorResponse } from '@/lib/invite-service'
 
 type Params = { params: Promise<{ discordId: string }> }
 
@@ -59,18 +60,14 @@ async function patchGuild(req: Request, { params }: Params) {
     )
   }
 
-  // Cree l'invitation permanente (erreur explicite si Discord refuse)
+  // Cree l'invitation permanente (via le bot du serveur ; erreur explicite si Discord refuse)
   let invite
   try {
-    invite = await createChannelInvite(token, channelId)
+    invite = await createInviteSmart(discordId, channelId)
   } catch (e) {
-    const detail = e instanceof Error ? e.message : 'erreur Discord'
-    return Response.json(
-      {
-        error: `Impossible de creer l'invitation (${detail}). Verifie la permission « Creer une invitation » sur ce salon.`,
-      },
-      { status: 400 },
-    )
+    const resp = inviteErrorResponse(e)
+    if (resp) return resp
+    throw e
   }
 
   await db.invite.upsert({

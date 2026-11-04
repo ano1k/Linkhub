@@ -7,8 +7,10 @@
 export const DISCORD_API = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10'
 
 // Scopes OAuth valides chez Discord : identify (profil) + guilds (liste des serveurs).
-// La creation d'invitation n'a pas de scope dedie : la permission CREATE_INVITE
-// du membre sur le canal suffit avec le token utilisateur.
+// ATTENTION : Discord refuse les tokens UTILISATEUR sur les endpoints de serveur
+// (GET /guilds/{id}/channels etc.) : le listing des salons et la creation d'invitations
+// passent donc par un BOT ajoute au serveur (header "Authorization: Bot <token>"),
+// pas par le token utilisateur. Le scope guilds sert uniquement a lister les serveurs.
 export const DISCORD_SCOPES = ['identify', 'guilds'].join(' ')
 
 // Bits de permissions Discord
@@ -56,9 +58,26 @@ export type DiscordInvite = {
 }
 
 export type InviteMeta = {
+  code?: string
+  uses?: number
+  max_age?: number
   approximate_member_count?: number
   approximate_presence_count?: number
   expires_at?: string | null
+}
+
+/** Erreur cote Discord, avec le statut HTTP pour distinguer "bot absent" (403/404) d'un token invalide (401). */
+export class DiscordApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+/** Vrai si l'echec vient du fait que le bot n'est pas (ou plus) membre du serveur. */
+export function isBotNotInGuild(e: unknown): boolean {
+  return e instanceof DiscordApiError && (e.status === 403 || e.status === 404)
 }
 
 export function hasPermission(permissions: string | undefined, flag: bigint): boolean {
@@ -124,7 +143,7 @@ async function discordFetch<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // pas de corps JSON
     }
-    throw new Error(`Discord API ${res.status} ${detail}`.trim())
+    throw new DiscordApiError(res.status, `Discord API ${res.status} ${detail}`.trim())
   }
   return (await res.json()) as T
 }
@@ -215,4 +234,40 @@ export function listGuildInvites(accessToken: string, guildId: string): Promise<
 /** Informations publiques d'une invitation (compteurs approximatifs de membres). */
 export function fetchInviteMeta(code: string): Promise<InviteMeta> {
   return discordFetch<InviteMeta>(`/invites/${code}?with_counts=true`)
+}
+
+/* ---------------------- Endpoints via le BOT de la plateforme ---------------------- */
+/* Lister les salons et creer des invitations exige un bot membre du serveur :
+ * Discord renvoie 401/403 a tout token utilisateur sur ces endpoints. */
+
+/** Verifie que le bot est membre du serveur (403 si absent, 200 sinon). */
+export function fetchGuildAsBot(botToken: string, guildId: string): Promise<{ id: string; name: string }> {
+  return botFetch<{ id: string; name: string }>(`/guilds/${guildId}`, botToken)
+}
+
+/** Liste les salons du serveur avec le bot. */
+export function fetchGuildChannelsAsBot(botToken: string, guildId: string): Promise<DiscordChannel[]> {
+  return botFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`, botToken)
+}
+
+/** Cree une invitation permanente avec le bot (max_age = 0 => n'expire jamais). */
+export function createChannelInviteAsBot(
+  botToken: string,
+  channelId: string,
+  maxAge = 0,
+  maxUses = 0,
+): Promise<DiscordInvite> {
+  return botFetch<DiscordInvite>(`/channels/${channelId}/invites`, botToken, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_age: maxAge, max_uses: maxUses, unique: true }),
+  })
+}
+
+/** Requete avec le token du bot (header "Authorization: Bot"). */
+async function botFetch<T>(path: string, botToken: string, init?: RequestInit): Promise<T> {
+  return discordFetch<T>(path, {
+    ...init,
+    headers: { ...(init?.headers || {}), Authorization: `Bot ${botToken}` },
+  })
 }

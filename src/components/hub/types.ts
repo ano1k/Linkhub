@@ -10,6 +10,8 @@ export type AppConfigInfo = {
   discordConfigured: boolean
   mockMode: boolean
   clientId: string | null
+  botConfigured: boolean
+  addBotUrl: string | null
   redirectUri: string
   baseUrl: string
 }
@@ -45,6 +47,7 @@ export type AvailableGuild = {
 export type DashboardGuildsResponse = {
   guilds: SharedGuild[]
   available: AvailableGuild[]
+  botConfigured: boolean
 }
 
 export type ApiKeyItem = {

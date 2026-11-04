@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 export type DiscordConfig = {
   clientId: string
   clientSecret: string
+  botToken: string
 }
 
 /**
@@ -72,17 +73,20 @@ export function isMockMode(): boolean {
 }
 
 /**
- * Recupere les identifiants de l'application Discord.
+ * Recupere les identifiants de l'application Discord (+ token du bot).
  * Priorite : configuration sauvegardee en base (via les Reglages du site) puis variables d'environnement.
  * En mode demo, des identifiants factures sont fournis automatiquement pour que la connexion fonctionne sans reglage.
+ * Le token du bot est lu via une requete brute tolérante : si la colonne discordBotToken
+ * n'existe pas encore (migration SQL non appliquee), le reste de la plateforme continue de fonctionner.
  */
 export async function getDiscordConfig(): Promise<DiscordConfig> {
+  let botToken = process.env.DISCORD_BOT_TOKEN || ''
   if (isMockMode()) {
     const row = await db.appConfig.findUnique({ where: { id: 'main' } }).catch(() => null)
     if (row?.discordClientId && row?.discordClientSecret) {
-      return { clientId: row.discordClientId, clientSecret: row.discordClientSecret }
+      return { clientId: row.discordClientId, clientSecret: row.discordClientSecret, botToken }
     }
-    return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret' }
+    return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret', botToken: '' }
   }
   let clientId = process.env.DISCORD_CLIENT_ID || ''
   let clientSecret = process.env.DISCORD_CLIENT_SECRET || ''
@@ -93,7 +97,33 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
   } catch {
     // base non initialisee : on retombe sur les variables d'environnement
   }
-  return { clientId, clientSecret }
+  try {
+    const rows = await db.$queryRawUnsafe<{ discordBotToken: string | null }[]>(
+      'SELECT discordBotToken FROM AppConfig WHERE id = \'main\'',
+    )
+    if (Array.isArray(rows) && rows[0]?.discordBotToken) botToken = rows[0].discordBotToken
+  } catch {
+    // colonne discordBotToken absente (migration pas encore appliquee) : on ignore
+  }
+  return { clientId, clientSecret, botToken }
+}
+
+/**
+ * URL pour ajouter le bot de l'application a un serveur Discord.
+ * permissions = VIEW_CHANNEL (1024) + CREATE_INSTANT_INVITE (1) : le minimum requis
+ * pour lister les salons et creer les invitations.
+ */
+export function buildBotInviteUrl(clientId: string, guildId?: string): string {
+  if (!clientId) return ''
+  const url = new URL('https://discord.com/oauth2/authorize')
+  url.searchParams.set('client_id', clientId)
+  url.searchParams.set('scope', 'bot')
+  url.searchParams.set('permissions', '1025')
+  if (guildId) {
+    url.searchParams.set('guild_id', guildId)
+    url.searchParams.set('disable_guild_select', 'true')
+  }
+  return url.toString()
 }
 
 export function isDiscordConfigured(config: DiscordConfig): boolean {

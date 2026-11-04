@@ -1,3 +1,7 @@
+
+> nextjs_tailwind_shadcn_ts@0.2.1 db:sql
+> prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -17,6 +21,7 @@ CREATE TABLE "AppConfig" (
     "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'main',
     "discordClientId" TEXT,
     "discordClientSecret" TEXT,
+    "discordBotToken" TEXT,
     "updatedAt" DATETIME NOT NULL
 );
 

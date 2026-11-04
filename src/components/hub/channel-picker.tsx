@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Hash, Loader2, ShieldAlert } from 'lucide-react'
+import { ExternalLink, Hash, Loader2, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,8 +13,10 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from '@/hooks/use-toast'
-import { readJson, responseError } from '@/lib/utils'
+import { readJson } from '@/lib/utils'
 import type { ChannelItem } from './types'
+
+type PickerError = { message: string; addBotUrl?: string | null }
 
 /**
  * Dialog de selection d'un salon texte : utilise pour le partage initial
@@ -43,7 +45,7 @@ export function ChannelPickerDialog({
   const [selected, setSelected] = useState<ChannelItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<PickerError | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -52,11 +54,14 @@ export function ChannelPickerDialog({
     setSelected(null)
     fetch(`/api/dashboard/guilds/${guildId}/channels`)
       .then(async (res) => {
-        const data = await readJson<{ error?: string; channels?: ChannelItem[] }>(res)
-        if (!res.ok) throw new Error(responseError(res, data))
+        const data = await readJson<{ error?: string; channels?: ChannelItem[]; addBotUrl?: string | null }>(res)
+        if (!res.ok) {
+          setError({ message: data.error || `Erreur serveur (HTTP ${res.status})`, addBotUrl: data.addBotUrl })
+          return
+        }
         setChannels(data.channels || [])
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Erreur inconnue'))
+      .catch((e) => setError({ message: e instanceof Error ? e.message : 'Erreur inconnue' }))
       .finally(() => setLoading(false))
   }, [open, guildId])
 
@@ -93,9 +98,19 @@ export function ChannelPickerDialog({
             Chargement des salons...
           </div>
         ) : error ? (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-            {error}
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+              {error.message}
+            </div>
+            {error.addBotUrl && (
+              <a href={error.addBotUrl} target="_blank" rel="noreferrer" className="block">
+                <Button variant="secondary" className="w-full gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Ajouter le bot a ce serveur
+                </Button>
+              </a>
+            )}
           </div>
         ) : channels.length === 0 ? (
           <p className="text-sm text-muted-foreground py-6 text-center">

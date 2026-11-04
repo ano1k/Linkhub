@@ -3,13 +3,14 @@ import { getSessionUser } from '@/lib/auth'
 import { ensureAccessToken } from '@/lib/refresher'
 import {
   canCreateInvites,
-  createChannelInvite,
   fetchInviteMeta,
   fetchUserGuilds,
   guildIconUrl,
   isAdministrator,
   type DiscordGuild,
 } from '@/lib/discord'
+import { getDiscordConfig, isMockMode } from '@/lib/config'
+import { createInviteSmart, inviteErrorResponse } from '@/lib/invite-service'
 
 function serializeShared(
   row: Awaited<ReturnType<typeof db.guild.findFirst>> & { invite: { code: string; uses: number } | null },
@@ -75,7 +76,12 @@ export async function GET() {
       shared: false,
     }))
 
-  return Response.json({ guilds, available })
+  // Le bot est requis pour lister les salons et creer les invitations (Discord
+  // refuse les tokens utilisateur sur ces endpoints).
+  const { botToken } = await getDiscordConfig()
+  const botConfigured = Boolean(botToken) || isMockMode()
+
+  return Response.json({ guilds, available, botConfigured })
 }
 
 // POST /api/dashboard/guilds -> partage un serveur { discordId, channelId, channelName }
@@ -126,18 +132,15 @@ async function shareGuild(req: Request) {
     )
   }
 
-  // Cree l'invitation permanente sur le salon choisi (erreur explicite si Discord refuse)
+  // Cree l'invitation permanente sur le salon choisi : via le BOT du serveur
+  // (Discord refuse la creation d'invitation avec un token utilisateur).
   let invite
   try {
-    invite = await createChannelInvite(token, channelId)
+    invite = await createInviteSmart(discordId, channelId)
   } catch (e) {
-    const detail = e instanceof Error ? e.message : 'erreur Discord'
-    return Response.json(
-      {
-        error: `Impossible de creer l'invitation sur ce salon (${detail}). Verifie que tu as la permission « Creer une invitation » sur ce salon, ou choisis un autre salon.`,
-      },
-      { status: 400 },
-    )
+    const resp = inviteErrorResponse(e)
+    if (resp) return resp
+    throw e
   }
 
   const row = await db.guild.upsert({

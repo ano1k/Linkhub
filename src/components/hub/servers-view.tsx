@@ -77,7 +77,7 @@ export function ServersView({
   data,
   onChanged,
 }: {
-  data: { guilds: SharedGuild[]; available: AvailableGuild[] }
+  data: { guilds: SharedGuild[]; available: AvailableGuild[]; botConfigured: boolean }
   onChanged: () => void
 }) {
   const [shareTarget, setShareTarget] = useState<AvailableGuild | null>(null)
@@ -185,10 +185,21 @@ export function ServersView({
     }
   }
 
-  const { guilds, available } = data
+  const { guilds, available, botConfigured } = data
 
   return (
     <div className="space-y-10">
+      {/* Bot requis : sans lui, Discord refuse de lister les salons / creer les invitations */}
+      {!botConfigured && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-400 flex items-start gap-3">
+          <CircleAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            Le bot Discord n&apos;est pas encore configure : le partage de serveur est bloque.
+            Un staff doit ajouter le Bot Token dans l&apos;onglet Reglages.
+          </span>
+        </div>
+      )}
+
       {/* Serveurs partages */}
       <section>
         <div className="flex items-end justify-between gap-3 mb-4">

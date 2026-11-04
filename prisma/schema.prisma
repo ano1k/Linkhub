@@ -28,6 +28,7 @@ model AppConfig {
   id                  String   @id @default("main")
   discordClientId     String?
   discordClientSecret String?
+  discordBotToken     String? // token du bot Discord : cree les invitations sur les serveurs ou il est ajoute
   updatedAt           DateTime @updatedAt
 }
 

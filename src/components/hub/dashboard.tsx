@@ -45,6 +45,7 @@ export function Dashboard({
         needsReauth?: boolean
         guilds?: SharedGuild[]
         available?: AvailableGuild[]
+        botConfigured?: boolean
       }>(res)
       if (res.status === 401 && payload.needsReauth) {
         setNeedsReauth(true)
@@ -52,7 +53,11 @@ export function Dashboard({
         return
       }
       if (!res.ok) throw new Error(responseError(res, payload))
-      setGuildsData({ guilds: payload.guilds || [], available: payload.available || [] })
+      setGuildsData({
+        guilds: payload.guilds || [],
+        available: payload.available || [],
+        botConfigured: payload.botConfigured ?? false,
+      })
       setGuildsError(null)
     } catch (e) {
       setGuildsError(e instanceof Error ? e.message : 'Erreur inconnue')
