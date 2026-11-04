@@ -61,10 +61,23 @@ export async function GET(req: Request) {
     return res
   } catch (e) {
     const raw = e instanceof Error ? e.message : 'Erreur inconnue pendant la connexion.'
-    // 401 invalid_client = Client ID/Secret incorrects (souvent saisis dans Reglages)
-    const message = raw.includes('invalid_client')
-      ? "Identifiants Discord refuses (Client ID ou Client Secret incorrect) : ouvre Reglages sur la page d'accueil et corrige-les, puis reconnecte-toi."
-      : raw
-    return fail(message)
+    if (raw.includes('invalid_client')) {
+      // Client ID / Secret invalides en base : on les efface pour REOUVRIR le panneau
+      // de configuration publique. Sans ca, les Reglages (reserves au staff connecte)
+      // seraient inaccessibles : le login est casse, personne ne peut plus y acceder.
+      // Les identifiants effaces sont de toute facon morts (Discord les refuse).
+      try {
+        await db.appConfig.update({
+          where: { id: 'main' },
+          data: { discordClientId: '', discordClientSecret: '' },
+        })
+      } catch {
+        // pas de ligne 'main' en base : rien a reinitialiser
+      }
+      return fail(
+        'Identifiants Discord refuses (Client ID ou Client Secret incorrect). Ils ont ete reinitialises : clique sur « Reglages » en haut a droite, colle les bons identifiants depuis le portail developpeur Discord (Application > OAuth2), enregistre, puis reconnecte-toi.',
+      )
+    }
+    return fail(raw)
   }
 }
