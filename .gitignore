@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -46,9 +47,17 @@ local-*
 *.log
 dev.log
 dev.out.log
-test
 prompt
+
+# bases SQLite locales / artefacts de schema (regenerees par `npm run db:push`)
+/db/*.db
+/db/*.db-journal
+/db/*.db-wal
+/db/*.db-shm
+/linkhub-schema.db
 
 server.log
 # Skills directory
 /skills/
+# Client Prisma généré (postinstall / prebuild)
+/src/generated/

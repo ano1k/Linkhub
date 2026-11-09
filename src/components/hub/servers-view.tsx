@@ -10,7 +10,10 @@ import {
   ExternalLink,
   Hash,
   Loader2,
+  MousePointerClick,
+  Plus,
   RefreshCw,
+  Server,
   Shield,
   Trash2,
   Users,
@@ -32,8 +35,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from '@/hooks/use-toast'
 import { ChannelPickerDialog } from './channel-picker'
-import { readJson, responseError } from '@/lib/utils'
-import type { AvailableGuild, ChannelItem, SharedGuild } from './types'
+import { readJson, responseError, cn } from '@/lib/utils'
+import type { AvailableGuild, ChannelItem, DashboardGuildsResponse, SharedGuild } from './types'
+
+function formatNumber(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '—'
+  return new Intl.NumberFormat('fr-FR').format(n)
+}
 
 function timeAgo(iso: string | null): string {
   if (!iso) return 'jamais'
@@ -47,6 +55,27 @@ function timeAgo(iso: string | null): string {
   if (h < 24) return `il y a ${h} h`
   const d = Math.floor(h / 24)
   return d === 1 ? 'il y a 1 jour' : `il y a ${d} jours`
+}
+
+/**
+ * Mini histogramme des clics sur 7 jours (aucune librairie de graphiques).
+ * Masque si aucun clic : pas de bruit visuel sur un serveur qui ne convertit pas.
+ */
+function ClickSparkline({ series }: { series?: number[] }) {
+  if (!series || series.length === 0) return null
+  const max = Math.max(...series)
+  if (max <= 0) return null
+  return (
+    <span className="flex h-4 items-end gap-0.5" aria-hidden="true">
+      {series.map((value, index) => (
+        <span
+          key={index}
+          className="w-1 rounded-sm bg-violet-400/70"
+          style={{ height: `${Math.max(12, Math.round((value / max) * 100))}%` }}
+        />
+      ))}
+    </span>
+  )
 }
 
 function StatusBadge({ status, msg, at }: { status: string | null; msg: string | null; at: string | null }) {
@@ -77,7 +106,7 @@ export function ServersView({
   data,
   onChanged,
 }: {
-  data: { guilds: SharedGuild[]; available: AvailableGuild[]; botConfigured: boolean }
+  data: DashboardGuildsResponse
   onChanged: () => void
 }) {
   const [shareTarget, setShareTarget] = useState<AvailableGuild | null>(null)
@@ -186,7 +215,7 @@ export function ServersView({
     }
   }
 
-  const { guilds, available, botConfigured } = data
+  const { guilds, available, botConfigured, missingBot, botError } = data
 
   return (
     <div className="space-y-10">
@@ -200,6 +229,39 @@ export function ServersView({
           </span>
         </div>
       )}
+
+      {botError && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-300 flex items-start gap-3">
+          <CircleAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            {botError === 'invalid_token'
+              ? "Le token du bot est invalide ou a expiré. Vérifie-le dans les Réglages → Bot."
+              : botError === 'bot_not_configured'
+                ? "Le bot n'est pas configuré. Ajoute le Bot Token dans les Réglages → Bot."
+                : "Impossible de vérifier la présence du bot pour le moment. Réessaie dans un instant."}
+          </span>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        {[
+          { label: 'Serveurs partagés', value: String(guilds.length), icon: Server },
+          { label: 'Membres cumulés', value: formatNumber(guilds.reduce((s, g) => s + (g.memberCount ?? 0), 0)), icon: Users },
+          { label: 'En ligne', value: formatNumber(guilds.reduce((s, g) => s + (g.onlineCount ?? 0), 0)), icon: Wifi },
+          { label: 'Erreurs', value: String(guilds.filter((g) => g.lastCheckStatus === 'error').length), icon: CircleAlert },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-white/8 bg-card/50 p-3 flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-violet-500/12 border border-violet-400/20 flex items-center justify-center shrink-0">
+              <stat.icon className="h-4 w-4 text-violet-300" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold tabular-nums leading-tight">{stat.value}</p>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{stat.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* Serveurs partages */}
       <section>
@@ -218,13 +280,17 @@ export function ServersView({
         </div>
 
         {guilds.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
-            Aucun serveur partage pour le moment. Choisis un serveur ci-dessous pour commencer.
+          <div className="rounded-2xl border border-dashed border-white/12 bg-card/30 p-10 text-center">
+            <div className="mx-auto h-11 w-11 rounded-xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
+              <Server className="h-5 w-5 text-violet-300" />
+            </div>
+            <p className="text-sm font-medium">Aucun serveur partagé pour le moment</p>
+            <p className="text-xs text-muted-foreground mt-1">Choisis un serveur ci-dessous pour commencer.</p>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {guilds.map((g) => (
-              <Card key={g.discordId} className="bg-card/70 border-border/70">
+              <Card key={g.discordId} className="bg-card/60 border-white/8 card-hover overflow-hidden">
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     <Avatar className="h-11 w-11 rounded-lg border border-border">
@@ -319,10 +385,22 @@ export function ServersView({
                     <span className="flex items-center gap-1.5" title="Utilisations de l'invitation">
                       <ExternalLink className="h-3.5 w-3.5" /> {g.uses} entrees
                     </span>
+                    <span
+                      className="flex items-center gap-1.5"
+                      title={`Clics sur le lien : ${g.clicks?.today ?? 0} aujourd'hui · ${g.clicks?.last7Days ?? 0} sur 7 jours · ${g.clicks?.last30Days ?? 0} sur 30 jours`}
+                    >
+                      <MousePointerClick className="h-3.5 w-3.5 text-violet-400/80" />{' '}
+                      {g.clicks?.last7Days ?? 0} clics
+                    </span>
+                    <ClickSparkline series={g.clicks?.series} />
                   </div>
 
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <StatusBadge status={g.lastCheckStatus} msg={g.lastCheckMsg} at={g.lastCheckAt} />
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {g.lastCheckLatencyMs ? `${g.lastCheckLatencyMs} ms` : ''}
+                      {g.failureCount ? ` · ${g.failureCount} échec${g.failureCount > 1 ? 's' : ''}` : ''}
+                    </span>
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -427,6 +505,59 @@ export function ServersView({
           </div>
         )}
       </section>
+
+      {/* Serveurs sans le bot : on ne les affiche pas dans la liste principale */}
+      {missingBot.length > 0 && (
+        <section>
+          <div className="mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">Serveurs sans le bot</h2>
+              <Badge variant="outline" className="border-amber-400/30 text-amber-300 text-[10px]">
+                {missingBot.length}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Le bot doit être membre du serveur pour lister les salons et créer l'invitation.
+              Ajoute-le en un clic : il n'envoie jamais de messages.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {missingBot.map((g) => (
+              <div key={g.discordId} className="rounded-xl border border-amber-400/20 bg-amber-500/[0.04] p-4 flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <Avatar className="h-10 w-10 rounded-lg border border-white/10">
+                    {g.iconUrl ? (
+                      <AvatarImage src={g.iconUrl} alt={`Icône de ${g.name}`} />
+                    ) : (
+                      <AvatarFallback className="rounded-lg bg-amber-500/15 text-amber-200 text-xs font-semibold">
+                        {g.name.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{g.name}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="border-amber-400/30 text-amber-300 text-[9px] gap-1">
+                        <CircleAlert className="h-3 w-3" /> Bot manquant
+                      </Badge>
+                      {g.shared && (
+                        <Badge variant="outline" className="border-white/10 text-muted-foreground text-[9px]">
+                          Partagé
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <a href={g.inviteUrl} target="_blank" rel="noreferrer" className="block">
+                  <Button size="sm" className="w-full gap-1.5">
+                    <Plus className="h-3.5 w-3.5" /> Ajouter le bot
+                  </Button>
+                </a>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Dialogs */}
       {shareTarget && (

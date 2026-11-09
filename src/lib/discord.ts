@@ -14,9 +14,9 @@ export const DISCORD_API = process.env.DISCORD_API_BASE || 'https://discord.com/
 export const DISCORD_SCOPES = ['identify', 'guilds'].join(' ')
 
 // Bits de permissions Discord
-export const PERM_ADMINISTRATOR = 0x8n
-export const PERM_MANAGE_GUILD = 0x20n
-export const PERM_CREATE_INSTANT_INVITE = 0x1n
+export const PERM_ADMINISTRATOR = BigInt(0x8)
+export const PERM_MANAGE_GUILD = BigInt(0x20)
+export const PERM_CREATE_INSTANT_INVITE = BigInt(0x1)
 
 export type DiscordTokens = {
   access_token: string
@@ -69,15 +69,41 @@ export type InviteMeta = {
 /** Erreur cote Discord, avec le statut HTTP pour distinguer "bot absent" (403/404) d'un token invalide (401). */
 export class DiscordApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  retryAfter?: number
+  constructor(status: number, message: string, retryAfter?: number) {
     super(message)
     this.status = status
+    this.retryAfter = retryAfter
   }
+}
+
+/** Attend un nombre de millisecondes (sans bloquer le process). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /** Vrai si l'echec vient du fait que le bot n'est pas (ou plus) membre du serveur. */
 export function isBotNotInGuild(e: unknown): boolean {
   return e instanceof DiscordApiError && (e.status === 403 || e.status === 404)
+}
+
+/**
+ * Vrai si Discord affirme que l'invitation n'existe plus (404 "Unknown Invite").
+ * C'est le SEUL cas ou il faut en regenerer une : une erreur reseau, un 429 ou un 5xx
+ * ne prouvent rien sur l'etat de l'invitation.
+ */
+export function isUnknownInviteError(e: unknown): boolean {
+  return e instanceof DiscordApiError && e.status === 404
+}
+
+/**
+ * Vrai si l'echec est probablement temporaire (reseau/timeout = status 0, 429 apres
+ * les retentatives, 5xx). Ces erreurs ne doivent jamais declencher de regeneration :
+ * un incident Discord ne doit pas recreer toutes les invitations de la plateforme.
+ */
+export function isTransientDiscordError(e: unknown): boolean {
+  if (!(e instanceof DiscordApiError)) return true
+  return e.status === 0 || e.status === 429 || e.status >= 500
 }
 
 export function hasPermission(permissions: string | undefined, flag: bigint): boolean {
@@ -133,17 +159,54 @@ export function buildAuthorizeUrl(
   return url.toString()
 }
 
-async function discordFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${DISCORD_API}${path}`, { ...init, cache: 'no-store' })
-  if (!res.ok) {
-    let detail = ''
+async function discordFetch<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${DISCORD_API}${path}`, {
+      ...init,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(12_000),
+    })
+  } catch (e) {
+    if (attempt < 1) {
+      await sleep(400)
+      return discordFetch<T>(path, init, attempt + 1)
+    }
+    throw new DiscordApiError(0, e instanceof Error ? e.message : 'Discord injoignable')
+  }
+
+  if (res.status === 429 && attempt < 1) {
+    let retryAfter = 1
     try {
-      const body = await res.json()
-      detail = body?.error || body?.message || ''
+      const body = (await res.json()) as { retry_after?: number }
+      retryAfter = Math.min(5, Math.max(0.25, Number(body?.retry_after) || 1))
     } catch {
       // pas de corps JSON
     }
-    throw new DiscordApiError(res.status, `Discord API ${res.status} ${detail}`.trim())
+    await sleep(retryAfter * 1000)
+    return discordFetch<T>(path, init, attempt + 1)
+  }
+
+  if (res.status >= 500 && attempt < 1) {
+    await sleep(400)
+    return discordFetch<T>(path, init, attempt + 1)
+  }
+
+  if (!res.ok) {
+    let detail = ''
+    let retryAfter: number | undefined
+    try {
+      const body = (await res.json()) as { error?: string; message?: string; retry_after?: number }
+      detail = body?.error || body?.message || ''
+      retryAfter = body?.retry_after
+    } catch {
+      // pas de corps JSON
+    }
+    throw new DiscordApiError(
+      res.status,
+      `Discord API ${res.status} ${detail}`.trim(),
+      retryAfter,
+    )
   }
   return (await res.json()) as T
 }

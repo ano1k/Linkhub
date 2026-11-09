@@ -4,5 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "bun --hot index.ts"
-  }
+  },
+  "type": "module"
 }

@@ -6,6 +6,7 @@ import {
   isBotNotInGuild,
 } from '@/lib/discord'
 import { buildBotInviteUrl, getDiscordConfig, isMockMode } from '@/lib/config'
+import { isSnowflake, rateLimit, rateLimitHeaders } from '@/lib/security'
 
 type Params = { params: Promise<{ discordId: string }> }
 
@@ -27,6 +28,18 @@ async function listChannels({ params }: Params) {
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
   const { discordId } = await params
+  if (!isSnowflake(discordId)) {
+    return Response.json({ error: 'Identifiant de serveur invalide.' }, { status: 400 })
+  }
+
+  const limit = rateLimit(`channels:${user.id}`, 30, 60_000)
+  if (!limit.allowed) {
+    return Response.json(
+      { error: 'Trop de requetes. Reessaie dans un instant.' },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    )
+  }
+
   const { clientId, botToken } = await getDiscordConfig()
 
   // 1. Bot configure : c'est lui qui liste les salons

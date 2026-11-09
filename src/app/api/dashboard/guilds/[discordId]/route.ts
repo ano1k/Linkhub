@@ -3,6 +3,15 @@ import { getSessionUser } from '@/lib/auth'
 import { ensureAccessToken } from '@/lib/refresher'
 import { fetchInviteMeta } from '@/lib/discord'
 import { createInviteSmart, inviteErrorResponse } from '@/lib/invite-service'
+import {
+  checkSameOrigin,
+  getRequestMeta,
+  isSnowflake,
+  rateLimit,
+  rateLimitHeaders,
+  recordAudit,
+  sanitizeText,
+} from '@/lib/security'
 
 type Params = { params: Promise<{ discordId: string }> }
 
@@ -20,10 +29,26 @@ export async function PATCH(req: Request, { params }: Params) {
 }
 
 async function patchGuild(req: Request, { params }: Params) {
+  const originError = checkSameOrigin(req)
+  if (originError) return Response.json({ error: originError }, { status: 403 })
+
   const user = await getSessionUser()
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
   const { discordId } = await params
+  if (!isSnowflake(discordId)) {
+    return Response.json({ error: 'Identifiant de serveur invalide.' }, { status: 400 })
+  }
+
+  const meta = getRequestMeta(req)
+  const limit = rateLimit(`guild-patch:${user.id}`, 20, 60_000)
+  if (!limit.allowed) {
+    return Response.json(
+      { error: 'Trop de modifications. Reessaie dans une minute.' },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    )
+  }
+
   const row = await db.guild.findUnique({
     where: { discordId_ownerId: { discordId, ownerId: user.id } },
     include: { invite: true },
@@ -47,7 +72,7 @@ async function patchGuild(req: Request, { params }: Params) {
 
   if (body.action === 'setChannel') {
     channelId = (body.channelId || '').trim() || null
-    channelName = (body.channelName || '').trim() || null
+    channelName = sanitizeText(body.channelName, 100) || null
     if (!channelId) {
       return Response.json({ error: 'Choisis un salon texte.' }, { status: 400 })
     }
@@ -101,23 +126,36 @@ async function patchGuild(req: Request, { params }: Params) {
     // pas bloquant
   }
 
-  return Response.json({
-    guild: {
-      discordId: updated.discordId,
-      name: updated.name,
-      inviteUrl: `https://discord.gg/${updated.invite?.code}`,
-      channelId: updated.channelId,
-      channelName: updated.channelName,
-      lastCheckStatus: updated.lastCheckStatus,
-      lastCheckMsg: updated.lastCheckMsg,
-    },
+  await recordAudit({
+    action: 'guild.update',
+    actorId: user.id,
+    actorName: user.username,
+    target: discordId,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+    metadata: { action: body.action, channelId, channelName },
   })
+
+  return Response.json(
+    {
+      guild: {
+        discordId: updated.discordId,
+        name: updated.name,
+        inviteUrl: `https://discord.gg/${updated.invite?.code}`,
+        channelId: updated.channelId,
+        channelName: updated.channelName,
+        lastCheckStatus: updated.lastCheckStatus,
+        lastCheckMsg: updated.lastCheckMsg,
+      },
+    },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
 }
 
 // DELETE /api/dashboard/guilds/[discordId] -> arrete le partage
-export async function DELETE(_req: Request, { params }: Params) {
+export async function DELETE(req: Request, { params }: Params) {
   try {
-    return await deleteGuild({ params })
+    return await deleteGuild(req, { params })
   } catch (e) {
     const detail = e instanceof Error ? e.message : 'Erreur inconnue'
     console.error('[guilds:delete]', detail)
@@ -125,16 +163,31 @@ export async function DELETE(_req: Request, { params }: Params) {
   }
 }
 
-async function deleteGuild({ params }: Params) {
+async function deleteGuild(req: Request, { params }: Params) {
+  const originError = checkSameOrigin(req)
+  if (originError) return Response.json({ error: originError }, { status: 403 })
+
   const user = await getSessionUser()
   if (!user) return Response.json({ error: 'Non connecte.' }, { status: 401 })
 
   const { discordId } = await params
+  if (!isSnowflake(discordId)) {
+    return Response.json({ error: 'Identifiant de serveur invalide.' }, { status: 400 })
+  }
   const row = await db.guild.findUnique({
     where: { discordId_ownerId: { discordId, ownerId: user.id } },
   })
   if (!row) return Response.json({ error: 'Serveur non trouve.' }, { status: 404 })
 
   await db.guild.delete({ where: { id: row.id } })
+  const meta = getRequestMeta(req)
+  await recordAudit({
+    action: 'guild.remove',
+    actorId: user.id,
+    actorName: user.username,
+    target: discordId,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  })
   return Response.json({ ok: true })
 }

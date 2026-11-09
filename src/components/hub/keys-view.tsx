@@ -1,7 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { Copy, Eye, EyeOff, KeyRound, Loader2, Plus, ShieldAlert, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  ExternalLink,
+  Lock,
+  KeyRound,
+  Loader2,
+  Plus,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,8 +38,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from '@/hooks/use-toast'
-import { readJson, responseError } from '@/lib/utils'
-import type { ApiKeyItem } from './types'
+import { readJson, responseError, cn } from '@/lib/utils'
+import type { ApiKeyItem, CreatedApiKey } from './types'
 
 function formatDate(iso: string | null): string {
   if (!iso) return 'jamais'
@@ -44,9 +56,21 @@ export function KeysView({
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
-  const [revealed, setRevealed] = useState<Set<string>>(new Set())
+  const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ApiKeyItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const copy = async (value: string, label = 'Copié') => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(label)
+      setTimeout(() => setCopied(null), 1600)
+      toast({ title: label })
+    } catch {
+      toast({ title: 'Copie impossible', description: 'Sélectionne le texte manuellement.', variant: 'destructive' })
+    }
+  }
 
   const createKey = async () => {
     setCreating(true)
@@ -56,15 +80,16 @@ export function KeysView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName }),
       })
-      const payload = await readJson<{ error?: string }>(res)
+      const payload = await readJson<{ error?: string; key?: CreatedApiKey }>(res)
       if (!res.ok) throw new Error(responseError(res, payload))
+      if (!payload.key) throw new Error('Réponse serveur invalide.')
       setCreateOpen(false)
       setNewName('')
-      toast({ title: 'Cle creee', description: 'Copie-la maintenant : elle est visible dans la liste.' })
+      setCreatedKey(payload.key)
       onChanged()
     } catch (e) {
       toast({
-        title: 'Echec de la creation',
+        title: 'Échec de la création',
         description: e instanceof Error ? e.message : 'Erreur inconnue',
         variant: 'destructive',
       })
@@ -81,11 +106,11 @@ export function KeysView({
         const payload = await readJson<{ error?: string }>(res)
         throw new Error(responseError(res, payload))
       }
-      toast({ title: 'Cle supprimee', description: `${key.name} ne peut plus etre utilisee.` })
+      toast({ title: 'Clé supprimée', description: `${key.name} ne peut plus être utilisée.` })
       onChanged()
     } catch (e) {
       toast({
-        title: 'Echec',
+        title: 'Échec',
         description: e instanceof Error ? e.message : 'Erreur inconnue',
         variant: 'destructive',
       })
@@ -95,111 +120,130 @@ export function KeysView({
     }
   }
 
-  const copyKey = async (key: string) => {
-    try {
-      await navigator.clipboard.writeText(key)
-      toast({ title: 'Cle copiee' })
-    } catch {
-      toast({ title: 'Copie impossible', variant: 'destructive' })
-    }
-  }
-
-  const toggleReveal = (id: string) => {
-    setRevealed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">Cles d&apos;API</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Chaque cle donne acces aux serveurs que TOI tu partages. Limite : 120 requetes / minute / cle.
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold">Clés d’API</h2>
+            <Badge variant="outline" className="border-emerald-400/25 text-emerald-300 text-[10px] gap-1">
+              <ShieldCheck className="h-3 w-3" /> Hachées
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Chaque clé donne accès aux serveurs que <strong className="text-foreground">toi</strong> tu partages.
+            Limite : 120 requêtes/minute par clé. La clé en clair n’est affichée qu’une seule fois.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Nouvelle cle
+        <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0">
+          <Plus className="h-4 w-4" /> Nouvelle clé
         </Button>
       </div>
 
       {keys.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-8 text-center">
-          <KeyRound className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">
-            Aucune cle pour le moment. Cree ta premiere cle pour connecter tes sites.
+        <div className="rounded-2xl border border-dashed border-white/12 bg-card/30 p-10 text-center">
+          <div className="mx-auto h-12 w-12 rounded-xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
+            <KeyRound className="h-5 w-5 text-violet-300" />
+          </div>
+          <p className="text-sm font-medium">Aucune clé pour le moment</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            Crée ta première clé pour connecter tes sites et récupérer l’invitation à jour en une requête.
           </p>
+          <Button size="sm" className="mt-4 gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> Créer une clé
+          </Button>
         </div>
       ) : (
         <div className="grid gap-3">
           {keys.map((k) => (
-            <Card key={k.id} className="bg-card/70 border-border/70">
-              <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium">{k.name}</p>
-                    <Badge variant="outline" className="text-xs text-muted-foreground border-border">
-                      {k.requestCount} requete{k.requestCount > 1 ? 's' : ''}
-                    </Badge>
+            <Card key={k.id} className="bg-card/60 border-white/8 card-hover">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-violet-500/12 border border-violet-400/20 flex items-center justify-center shrink-0">
+                    <KeyRound className="h-4 w-4 text-violet-300" />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Derniere utilisation : {formatDate(k.lastUsedAt)} · creee le {formatDate(k.createdAt)}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <code className="text-xs font-mono bg-black/30 border border-border/60 rounded px-2 py-1 flex-1 truncate">
-                      {revealed.has(k.id) ? k.key : `${k.key.slice(0, 8)}${'•'.repeat(24)}`}
-                    </code>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0"
-                      onClick={() => toggleReveal(k.id)}
-                      aria-label={revealed.has(k.id) ? 'Masquer la clé' : 'Afficher la clé'}
-                    >
-                      {revealed.has(k.id) ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0"
-                      onClick={() => copyKey(k.key)}
-                      aria-label="Copier la clé"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">{k.name}</p>
+                      <Badge variant="outline" className="text-[10px] border-white/10 text-muted-foreground">
+                        {k.requestCount} requête{k.requestCount > 1 ? 's' : ''}
+                      </Badge>
+                      {k.lastUsedAt && (
+                        <Badge variant="outline" className="text-[10px] border-emerald-400/20 text-emerald-300/80">
+                          Active
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Dernière utilisation : {formatDate(k.lastUsedAt)} · créée le {formatDate(k.createdAt)}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1.5 text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 self-start sm:self-center"
+                    onClick={() => setDeleteTarget(k)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Révoquer
+                  </Button>
+                </div>
+
+                <div className="mt-3 grid sm:grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-white/8 bg-black/25 px-3 py-2">
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Clé API (masquée)</p>
+                    <div className="flex items-center gap-2">
+                      <code className="text-[11px] font-mono text-foreground/80 truncate flex-1">
+                        {k.keyPrefix}{'•'.repeat(18)}
+                      </code>
+                      <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/60 mt-1">La clé complète n’est plus récupérable.</p>
+                  </div>
+                  <div className="rounded-lg border border-white/8 bg-black/25 px-3 py-2">
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Jeton public (boutons)</p>
+                    <div className="flex items-center gap-2">
+                      <code className="text-[11px] font-mono text-foreground/80 truncate flex-1">
+                        {k.publicId ? `${k.publicId.slice(0, 10)}…${k.publicId.slice(-4)}` : '—'}
+                      </code>
+                      {k.publicId && (
+                        <button
+                          onClick={() => copy(k.publicId!, 'Jeton public copié')}
+                          className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-white/8"
+                          aria-label="Copier le jeton public"
+                        >
+                          {copied === 'Jeton public copié' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/60 mt-1">Non secret · pour /api/v1/go.</p>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 self-start sm:self-center"
-                  onClick={() => setDeleteTarget(k)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Supprimer
-                </Button>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      {/* Dialog creation */}
+      <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4 flex items-start gap-2.5">
+        <ShieldAlert className="h-4 w-4 text-amber-300 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          <strong className="text-foreground">Sécurité :</strong> seule une empreinte SHA-256 de la clé est stockée.
+          Si tu perds la clé en clair, révoque-la et crées-en une nouvelle. Les anciennes clés restent compatibles
+          mais ne sont plus affichées en clair.
+        </p>
+      </div>
+
+      {/* Dialog création */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Nouvelle cle d&apos;API</DialogTitle>
+            <DialogTitle>Nouvelle clé d’API</DialogTitle>
             <DialogDescription>
-              Donne un nom qui t&apos;aidera a retrouver a quel site sert cette cle.
+              Donne un nom qui t’aidera à retrouver à quel site sert cette clé.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="key-name">Nom de la cle</Label>
+            <Label htmlFor="key-name">Nom de la clé</Label>
             <Input
               id="key-name"
               placeholder="ex : Site vitrine, Forum, Partenaire..."
@@ -215,8 +259,64 @@ export function KeysView({
             </Button>
             <Button onClick={createKey} disabled={creating}>
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-              Creer la cle
+              Créer la clé
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog clé créée (une seule fois) */}
+      <Dialog open={!!createdKey} onOpenChange={(o) => !o && setCreatedKey(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" /> Clé créée
+            </DialogTitle>
+            <DialogDescription>
+              Copie cette clé maintenant : elle ne sera plus jamais affichée en entier.
+            </DialogDescription>
+          </DialogHeader>
+          {createdKey && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-300 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                  Toute personne possédant cette clé peut accéder à tes serveurs partagés. Ne la
+                  publie jamais côté client ni dans un dépôt public.
+                </p>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Clé API</Label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs font-mono break-all">
+                    {createdKey.key}
+                  </code>
+                  <Button size="sm" variant="outline" className="shrink-0 gap-1.5 border-white/10 bg-white/[0.03]" onClick={() => copy(createdKey.key, 'Clé copiée')}>
+                    {copied === 'Clé copiée' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Jeton public pour les boutons</Label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs font-mono break-all">
+                    {createdKey.publicId}
+                  </code>
+                  <Button size="sm" variant="outline" className="shrink-0 gap-1.5 border-white/10 bg-white/[0.03]" onClick={() => copy(createdKey.publicId, 'Jeton copié')}>
+                    {copied === 'Jeton copié' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/8 bg-white/[0.02] p-3">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Exemple de bouton</p>
+                <code className="text-[10px] font-mono text-foreground/70 break-all">
+                  {createdKey.directUrlTemplate.replace('{discordId}', 'ID_DU_SERVEUR')}
+                </code>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setCreatedKey(null)}>J’ai copié ma clé</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -225,14 +325,12 @@ export function KeysView({
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Supprimer la cle &laquo; {deleteTarget?.name} &raquo; ?</AlertDialogTitle>
+            <AlertDialogTitle>Supprimer la clé « {deleteTarget?.name} » ?</AlertDialogTitle>
             <AlertDialogDescription className="flex flex-col gap-2">
-              <span>
-                Toute integration utilisant cette cle cessera immediatement de fonctionner.
-              </span>
+              <span>Toute intégration utilisant cette clé cessera immédiatement de fonctionner.</span>
               <span className="flex items-start gap-2 text-amber-400">
                 <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-                Pense a mettre a jour tes sites avant de supprimer une cle encore utilisee.
+                Pense à mettre à jour tes sites avant de supprimer une clé encore utilisée.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

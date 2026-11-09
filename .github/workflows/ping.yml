@@ -1,0 +1,104 @@
+name: Ping (5 min)
+
+# Reveille le site et lance le cycle de rafraichissement des invitations toutes
+# les 5 minutes, sans dependre d'un service externe.
+#
+# - `CRON_SECRET` defini (secret du depot)  -> POST /api/cron/refresh :
+#   le site verifie les invitations et envoie le heartbeat Discord si echu.
+# - `CRON_SECRET` absent                    -> simple GET /api/ping (keep-alive),
+#   pour sortir l'instance serverless de veille sans rien casser.
+#
+# Mise en place (une fois) :
+#   Settings > Secrets and variables > Actions
+#     - Variable  SITE_URL     = https://ton-site.exemple.com  (sans slash final)
+#     - Secret    CRON_SECRET  = la meme valeur que cote site
+#
+# Notes : GitHub peut decaler un cron de quelques minutes en cas de charge, et
+# desactive les workflows planifies apres 60 jours sans activite du depot (il
+# suffit d'un commit ou de le relancer a la main).
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Jamais deux pings en parallele (un run lent ne doit pas s'empiler).
+concurrency:
+  group: ping
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Ping du site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Appeler le site
+        env:
+          SITE_URL: ${{ vars.SITE_URL || secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -uo pipefail
+
+          base="${SITE_URL:-}"
+          base="${base%/}"
+          if [ -z "${base}" ]; then
+            # Pas d'echec : un run rouge toutes les 5 min spammerait les e-mails
+            # tant que la configuration n'est pas faite.
+            echo "::warning::SITE_URL n'est pas defini : rien a pinger. Ajoute la variable de depot SITE_URL (Settings > Secrets and variables > Actions), par exemple https://linkhub.exemple.com"
+            exit 0
+          fi
+
+          if [ -n "${CRON_SECRET:-}" ]; then
+            url="${base}/api/cron/refresh"
+            method=POST
+            headers=(-H "Authorization: Bearer ${CRON_SECRET}")
+          else
+            echo "::warning::CRON_SECRET n'est pas defini : simple keep-alive sur /api/ping (aucun rafraichissement)."
+            url="${base}/api/ping"
+            method=GET
+            headers=(-H "X-Ping-Only: 1")
+          fi
+
+          body="$(mktemp)"
+          code="$(curl -sS -X "${method}" -m 25 --retry 2 --retry-delay 5 --retry-connrefused \
+            -o "${body}" -w '%{http_code}' \
+            -H "User-Agent: LinkHub-Scheduled-Ping" \
+            "${headers[@]}" \
+            "${url}")" || code=000
+
+          echo "HTTP ${code} — ${url}"
+          [ -s "${body}" ] && cat "${body}"
+          echo
+
+          case "${code}" in
+            200)
+              if [ -n "${CRON_SECRET:-}" ]; then
+                echo "::notice::Site joignable, cycle de rafraichissement effectue."
+              else
+                echo "::notice::Site joignable (keep-alive, aucun rafraichissement)."
+              fi
+              ;;
+            503)
+              echo "::warning::CRON_SECRET n'est pas defini cote site : le rafraichissement est desactive (le site reste joignable)."
+              ;;
+            401)
+              echo "::error::Le secret CRON_SECRET du depot ne correspond pas a celui du site."
+              exit 1
+              ;;
+            429)
+              echo "::warning::Trop d'appels pour cette IP (12/min) : ping ignore."
+              ;;
+            000)
+              echo "::error::Site injoignable (DNS, TLS ou timeout)."
+              exit 1
+              ;;
+            *)
+              echo "::error::Reponse inattendue du site."
+              exit 1
+              ;;
+          esac

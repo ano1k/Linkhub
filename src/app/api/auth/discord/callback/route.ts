@@ -2,6 +2,8 @@ import { db } from '@/lib/db'
 import { setSessionCookie } from '@/lib/auth'
 import { buildRedirectUri, getDiscordConfig, isDiscordConfigured, redirectRaw } from '@/lib/config'
 import { exchangeCode, fetchMe } from '@/lib/discord'
+import { getClientIp, rateLimit, rateLimitHeaders, recordAudit } from '@/lib/security'
+import { sealSecret } from '@/lib/secrets'
 
 function fail(message: string) {
   // Location relative : resolue par le navigateur sur l'origine courante (https en preview).
@@ -22,6 +24,12 @@ function readRequestCookie(req: Request, name: string): string | null {
 
 // GET /api/auth/discord/callback -> finalise la connexion
 export async function GET(req: Request) {
+  const ip = getClientIp(req)
+  const limit = rateLimit(`oauth-callback:${ip}`, 20, 60_000)
+  if (!limit.allowed) {
+    return fail('Trop de tentatives de connexion. Reessaie dans une minute.')
+  }
+
   const config = await getDiscordConfig()
   if (!isDiscordConfigured(config)) return fail('Application Discord non configuree.')
 
@@ -43,19 +51,30 @@ export async function GET(req: Request) {
       globalName: me.global_name ?? null,
       avatar: me.avatar ?? null,
       email: me.email ?? null,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
+      // Tokens chiffres en base (AES-256-GCM, cle derivee de APP_SECRET).
+      accessToken: sealSecret(tokens.access_token),
+      refreshToken: sealSecret(tokens.refresh_token),
       tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
     }
 
-    await db.user.upsert({
+    const user = await db.user.upsert({
       where: { id: me.id },
       create: { id: me.id, ...data },
       update: data,
     })
 
     const res = redirectRaw('/')
-    setSessionCookie(res, me.id, req)
+    // Le cookie porte la version de session courante (0 au premier passage).
+    setSessionCookie(res, me.id, req, user.sessionVersion ?? 0)
+    await recordAudit({
+      action: 'auth.login',
+      actorId: me.id,
+      actorName: me.global_name || me.username,
+      target: 'discord',
+      ip,
+      userAgent: req.headers.get('user-agent'),
+      metadata: { provider: 'discord' },
+    })
     // Le state a served : on l'efface en brut (auto-expire dans 10 min sinon).
     res.headers.append('set-cookie', 'dlh_oauth_state=; Path=/; HttpOnly; Max-Age=0')
     return res

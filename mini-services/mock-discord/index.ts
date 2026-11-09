@@ -24,7 +24,17 @@ const GUILDS = [
   { id: '900000000000000001', name: 'Serveur Test Admin', icon: null, owner: false, permissions: '8' },
   { id: '900000000000000002', name: 'Serveur Test Invite', icon: null, owner: false, permissions: '1' },
   { id: '900000000000000003', name: 'Serveur Sans Droits', icon: null, owner: false, permissions: '0' },
+  { id: '900000000000000004', name: 'Serveur à connecter', icon: null, owner: false, permissions: '1' },
 ]
+
+// Le bot de la plateforme n'est initialement que sur les deux premiers serveurs.
+// Le 4e est eligible (droit de creer une invitation) mais le bot n'y est pas :
+// il doit apparaitre dans la section « Bot manquant » avec un bouton d'ajout.
+const BOT_GUILDS = new Set(['900000000000000001', '900000000000000002'])
+
+function botInGuild(guildId: string): boolean {
+  return BOT_GUILDS.has(guildId)
+}
 
 const CHANNELS: Record<string, Array<{ id: string; name: string; type: number; position: number }>> = {
   '900000000000000001': [
@@ -33,6 +43,7 @@ const CHANNELS: Record<string, Array<{ id: string; name: string; type: number; p
     { id: '810000000000000003', name: 'bot-commands', type: 0, position: 2 },
   ],
   '900000000000000002': [{ id: '820000000000000001', name: 'accueil', type: 0, position: 0 }],
+  '900000000000000004': [{ id: '840000000000000001', name: 'bienvenue', type: 0, position: 0 }],
 }
 
 const channelById = new Map<string, { id: string; name: string; type: number; position: number } & { guildId: string }>()
@@ -41,6 +52,7 @@ for (const [guildId, chans] of Object.entries(CHANNELS)) {
 }
 
 const invites = new Map<string, MockInvite>()
+const webhookSink: Array<{ payload: unknown; at: string }> = []
 let inviteCounter = 1000
 let tokenCounter = 0
 let authCodeCounter = 0
@@ -93,13 +105,25 @@ async function handler(req: Request): Promise<Response> {
     return json(GUILDS)
   }
 
+  // Verifie que le bot est membre du serveur (utilise par LinkHub pour ne lister
+    // que les serveurs ou le bot est present).
+  const guildMatch = path.match(/^\/guilds\/(\d+)$/)
+  if (guildMatch && method === 'GET') {
+    if (!botInGuild(guildMatch[1])) return json({ message: 'Unknown Guild' }, 404)
+    const guild = GUILDS.find((g) => g.id === guildMatch[1])
+    return json(guild || { id: guildMatch[1], name: 'Mock Guild' })
+  }
+
   const channelsMatch = path.match(/^\/guilds\/(\d+)\/channels$/)
   if (channelsMatch) {
+    if (!botInGuild(channelsMatch[1])) return json({ message: 'Missing Permissions' }, 403)
     return json(CHANNELS[channelsMatch[1]] || [])
   }
 
   const channelInvitesMatch = path.match(/^\/channels\/(\d+)\/invites$/)
   if (channelInvitesMatch && method === 'GET') {
+    const channel = channelById.get(channelInvitesMatch[1])
+    if (!channel || !botInGuild(channel.guildId)) return json({ message: 'Missing Permissions' }, 403)
     const list = [...invites.values()].filter((i) => i.channel_id === channelInvitesMatch[1])
     return json(
       list.map((i) => ({
@@ -115,6 +139,7 @@ async function handler(req: Request): Promise<Response> {
 
   const guildInvitesMatch = path.match(/^\/guilds\/(\d+)\/invites$/)
   if (guildInvitesMatch) {
+    if (!botInGuild(guildInvitesMatch[1])) return json({ message: 'Missing Permissions' }, 403)
     const list = [...invites.values()].filter((i) => i.guild_id === guildInvitesMatch[1])
     return json(
       list.map((i) => ({
@@ -134,6 +159,7 @@ async function handler(req: Request): Promise<Response> {
     const channelId = createInviteMatch[1]
     const channel = channelById.get(channelId)
     if (!channel) return json({ message: 'Unknown Channel' }, 404)
+    if (!botInGuild(channel.guildId)) return json({ message: 'Missing Permissions' }, 403)
     const code = `mockInvite${++inviteCounter}`
     invites.set(code, {
       code,
@@ -181,8 +207,63 @@ async function handler(req: Request): Promise<Response> {
     return json({ ok: true, uses: invite.uses })
   }
 
+  // Ajout du bot a un serveur (mode demo)
+  if (path === '/mock/bot-invite' && method === 'POST') {
+    let body: { guild_id?: string } = {}
+    try { body = await req.json() } catch { body = {} }
+    if (body.guild_id && GUILDS.some((g) => g.id === body.guild_id)) {
+      BOT_GUILDS.add(body.guild_id)
+    }
+    return json({ ok: true, botGuilds: [...BOT_GUILDS] })
+  }
+
+  if (path === '/mock/bot-invite' && method === 'GET') {
+    return json({ botGuilds: [...BOT_GUILDS] })
+  }
+
+  // Sink de test pour le heartbeat Discord (mode demo)
+  if (path === '/mock/webhook' && method === 'POST') {
+    let payload: unknown = null
+    try { payload = JSON.parse(await req.text()) } catch { payload = null }
+    webhookSink.push({ payload, at: new Date().toISOString() })
+    if (webhookSink.length > 20) webhookSink.shift()
+    return new Response(null, { status: 204 })
+  }
+
+  if (path === '/mock/webhook/last' && method === 'GET') {
+    return json({ count: webhookSink.length, last: webhookSink[webhookSink.length - 1] ?? null })
+  }
+
+  if (path === '/mock/webhook' && method === 'GET') {
+    return json({ count: webhookSink.length, items: webhookSink })
+  }
+
   return json({ message: `Mock Discord : route inconnue ${method} ${path}` }, 404)
 }
 
-Bun.serve({ port: PORT, fetch: handler })
-console.log(`[mock-discord] serveur de test sur http://localhost:${PORT}`)
+import { createServer } from 'node:http'
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://localhost:${PORT}`)
+  const method = req.method || 'GET'
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(Buffer.from(chunk))
+  const body = chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined
+  const request = new Request(url.toString(), {
+    method,
+    headers: req.headers as unknown as HeadersInit,
+    body: method === 'POST' || method === 'PUT' || method === 'PATCH' ? body : undefined,
+  })
+  try {
+    const response = await handler(request)
+    const text = await response.text()
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+    res.end(text)
+  } catch (e) {
+    res.writeHead(500, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ message: e instanceof Error ? e.message : 'mock error' }))
+  }
+})
+server.listen(PORT, () => {
+  console.log(`[mock-discord] serveur de test sur http://localhost:${PORT}`)
+})

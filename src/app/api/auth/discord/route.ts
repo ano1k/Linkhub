@@ -10,9 +10,18 @@ import {
   redirectRelative,
 } from '@/lib/config'
 import { DISCORD_SCOPES, buildAuthorizeUrl } from '@/lib/discord'
+import { getClientIp, rateLimit, rateLimitHeaders } from '@/lib/security'
 
 // GET /api/auth/discord -> lance la connexion Discord
 export async function GET(req: Request) {
+  const ip = getClientIp(req)
+  const limit = rateLimit(`oauth-start:${ip}`, 10, 60_000)
+  if (!limit.allowed) {
+    return redirectRelative(
+      `/?auth_error=${encodeURIComponent('Trop de tentatives de connexion. Reessaie dans une minute.')}`,
+    )
+  }
+
   const config = await getDiscordConfig()
 
   if (!isDiscordConfigured(config)) {

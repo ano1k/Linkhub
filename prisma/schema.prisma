@@ -1,5 +1,7 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  engineType = "client"
 }
 
 datasource db {
@@ -17,10 +19,22 @@ model User {
   accessToken    String?
   refreshToken   String?
   tokenExpiresAt DateTime?
+  // Version de session : incrementee pour deconnecter partout (le cookie porte la version).
+  sessionVersion Int       @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   guilds         Guild[]
   apiKeys        ApiKey[]
+}
+
+// Verrou distribue des taches planifiees (rafraichissement des invitations).
+// Evite que deux instances executen le meme cycle : seul le detenteur du verrou
+// (lockedUntil dans le futur) travaille.
+model JobLock {
+  id          String   @id
+  lockedUntil DateTime
+  owner       String?
+  updatedAt   DateTime @updatedAt
 }
 
 // Configuration globale de la plateforme (credentials Discord, etc.)
@@ -32,26 +46,81 @@ model AppConfig {
   updatedAt           DateTime @updatedAt
 }
 
+// Reglages du site (staff) : surveillance Discord, branding.
+// Table separee d'AppConfig pour ne pas casser les requetes existantes si la
+// migration n'a pas encore ete appliquee sur une base plus ancienne.
+model SiteSettings {
+  id                     String    @id @default("main")
+  siteName               String? // nom affiche dans les notifications Discord
+  webhookUrl             String? // URL chiffree AES-256-GCM (jamais renvoyee en clair)
+  webhookEnabled         Boolean   @default(false)
+  webhookIntervalMinutes Int       @default(5)
+  webhookMention         String? // <@&ROLE_ID> ou @everyone (optionnel)
+  webhookMessage         String? // message custom, placeholders {status} {latency} {time}...
+  webhookIncludeStats    Boolean   @default(true)
+  webhookLastSentAt      DateTime?
+  webhookLastStatus      String? // ok | error | disabled | never
+  webhookLastLatencyMs   Int?
+  webhookLastHttpStatus  Int?
+  webhookLastError       String?
+  webhookSuccessCount    Int       @default(0)
+  webhookFailureCount    Int       @default(0)
+  updatedAt              DateTime  @updatedAt
+}
+
+// Historique des envois du heartbeat Discord (50 derniers conserves)
+model WebhookDelivery {
+  id            String   @id @default(cuid())
+  status        String // ok | error
+  httpStatus    Int?
+  latencyMs     Int?
+  siteStatus    String? // ok | error
+  siteLatencyMs Int?
+  error         String?
+  trigger       String? // heartbeat | test | manual
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Journal d'audit (securite) : connexions, modifications de config, cles, partages.
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actorName String?
+  action    String
+  target    String?
+  ip        String?
+  userAgent String?
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // Un serveur Discord partage par un utilisateur via la plateforme
 model Guild {
-  id              String    @id @default(cuid())
-  discordId       String // ID du serveur Discord
-  name            String
-  icon            String?
-  channelId       String? // salon texte utilise pour creer les invitations
-  channelName     String?
-  ownerId         String
-  owner           User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  memberCount     Int?
-  onlineCount     Int?
-  lastCheckAt     DateTime?
-  lastCheckStatus String? // ok | refreshed | error
-  lastCheckMsg    String?
-  invite          Invite?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  discordId         String // ID du serveur Discord
+  name              String
+  icon              String?
+  channelId         String? // salon texte utilise pour creer les invitations
+  channelName       String?
+  ownerId           String
+  owner             User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  memberCount       Int?
+  onlineCount       Int?
+  lastCheckAt       DateTime?
+  lastCheckStatus   String? // ok | refreshed | error
+  lastCheckMsg      String?
+  lastCheckLatencyMs Int?
+  failureCount      Int       @default(0)
+  invite            Invite?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@unique([discordId, ownerId])
+  @@index([discordId])
 }
 
 // Invitation Discord actuellement en vigueur pour un serveur partage
@@ -67,14 +136,35 @@ model Invite {
   updatedAt DateTime @updatedAt
 }
 
-// Cle d'API permettant a un site externe de recuperer les liens
+// Compteur de clics sur les liens de partage (page publique et redirections API),
+// agrege par jour. Aucune donnee personnelle (ni IP ni user-agent) n'est stockee.
+model ClickStat {
+  id        String   @id @default(cuid())
+  discordId String
+  day       String // AAAA-MM-JJ (UTC)
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([discordId, day])
+  @@index([discordId, day])
+}
+
+// Cle d'API permettant a un site externe de recuperer les liens.
+// Nouvelle generation : la cle en clair n'est jamais stockee.
+// - keyHash : SHA-256 de la cle (unite de recherche)
+// - key     : libelle masque (affichage) ou ancienne cle en clair (legacy)
+// - publicId : jeton public pour les boutons HTML /api/v1/go (non secret)
 model ApiKey {
   id           String    @id @default(cuid())
   key          String    @unique
+  keyHash      String?   @unique
+  keyPrefix    String?
+  publicId     String?   @unique
   name         String
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   lastUsedAt   DateTime?
+  lastIp       String?
   requestCount Int       @default(0)
   createdAt    DateTime  @default(now())
 }

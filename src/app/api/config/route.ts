@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { getSessionUser, isStaffUser } from '@/lib/auth'
 import {
+  APP_VERSION,
   buildBaseUrl,
   buildBotInviteUrl,
   buildRedirectUri,
@@ -8,34 +9,88 @@ import {
   isDiscordConfigured,
   isMockMode,
 } from '@/lib/config'
+import { getWebhookPublicConfig } from '@/lib/webhook'
+import { evaluateConfigWriteAccess } from '@/lib/setup'
+import { sealSecret } from '@/lib/secrets'
+import {
+  checkSameOrigin,
+  getRequestMeta,
+  isSnowflake,
+  rateLimit,
+  rateLimitHeaders,
+  recordAudit,
+  sanitizeText,
+  getClientIp,
+} from '@/lib/security'
 
-// GET /api/config -> etat de la configuration de la plateforme (public)
+// GET /api/config -> etat de la configuration de la plateforme (public, sans secret)
 export async function GET(req: Request) {
+  const ip = getClientIp(req)
+  const limit = rateLimit(`config:${ip}`, 60, 60_000)
+  if (!limit.allowed) {
+    return Response.json(
+      { error: 'Trop de requetes. Reessaie dans un instant.' },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    )
+  }
   const config = await getDiscordConfig()
-  return Response.json({
-    discordConfigured: isDiscordConfigured(config),
-    mockMode: isMockMode(),
-    clientId: config.clientId || null,
-    // en mode demo, le Discord simule accepte tout : le bot est "virtuellement" configure
-    botConfigured: Boolean(config.botToken) || isMockMode(),
-    addBotUrl: config.clientId ? buildBotInviteUrl(config.clientId) : null,
-    redirectUri: buildRedirectUri(req),
-    baseUrl: buildBaseUrl(req),
-  })
+  const webhook = await getWebhookPublicConfig().catch(() => null)
+  return Response.json(
+    {
+      discordConfigured: isDiscordConfigured(config),
+      mockMode: isMockMode(),
+      clientId: config.clientId || null,
+      // en mode demo, le Discord simule accepte tout : le bot est "virtuellement" configure
+      botConfigured: Boolean(config.botToken) || isMockMode(),
+      addBotUrl: config.clientId ? buildBotInviteUrl(config.clientId) : null,
+      redirectUri: buildRedirectUri(req),
+      baseUrl: buildBaseUrl(req),
+      version: APP_VERSION,
+      // L'UI affiche le champ « jeton d'installation » quand la variable existe.
+      setupTokenRequired: Boolean((process.env.SETUP_TOKEN || '').trim()),
+      webhook: webhook
+        ? {
+            configured: webhook.configured,
+            enabled: webhook.enabled,
+            intervalMinutes: webhook.intervalMinutes,
+            status: webhook.status,
+            lastSentAt: webhook.lastSentAt,
+            lastLatencyMs: webhook.lastLatencyMs,
+            successCount: webhook.successCount,
+            failureCount: webhook.failureCount,
+          }
+        : null,
+    },
+    { headers: { 'Cache-Control': 'no-store', ...rateLimitHeaders(limit) } },
+  )
 }
 
 // POST /api/config -> enregistre les identifiants de l'application Discord (+ Bot Token)
 // Autorise le premier reglage (bootstrap) sans connexion, puis exige une session staff.
 export async function POST(req: Request) {
-  let body: { clientId?: string; clientSecret?: string; botToken?: string }
+  const originError = checkSameOrigin(req)
+  if (originError) {
+    return Response.json({ error: originError }, { status: 403 })
+  }
+
+  const meta = getRequestMeta(req)
+  const limit = rateLimit(`config:${meta.ip}`, 12, 60_000)
+  if (!limit.allowed) {
+    return Response.json(
+      { error: 'Trop de tentatives. Reessaie dans une minute.' },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    )
+  }
+
+  let body: { clientId?: string; clientSecret?: string; botToken?: string; setupToken?: string }
   try {
     body = await req.json()
   } catch {
     return Response.json({ error: 'Corps de requete invalide.' }, { status: 400 })
   }
 
-  const clientId = (body.clientId || '').trim()
-  const clientSecret = (body.clientSecret || '').trim()
+  const clientId = sanitizeText(body.clientId, 40)
+  const clientSecret = sanitizeText(body.clientSecret, 200)
   const botToken = typeof body.botToken === 'string' ? body.botToken.trim() : undefined
   if (!clientId || !clientSecret) {
     return Response.json(
@@ -43,17 +98,31 @@ export async function POST(req: Request) {
       { status: 400 },
     )
   }
+  if (!isSnowflake(clientId)) {
+    return Response.json(
+      { error: "Le Client ID doit etre l'identifiant Discord de l'application (17 a 20 chiffres)." },
+      { status: 400 },
+    )
+  }
+  if (clientSecret.length < 20) {
+    return Response.json({ error: 'Le Client Secret semble incomplet.' }, { status: 400 })
+  }
 
   const current = await getDiscordConfig()
   const alreadyConfigured = isDiscordConfigured(current)
-  if (alreadyConfigured) {
-    const user = await getSessionUser()
-    if (!isStaffUser(user)) {
-      return Response.json(
-        { error: 'Les reglages sont reserves au staff.' },
-        { status: 403 },
-      )
-    }
+  const user = await getSessionUser()
+
+  const access = evaluateConfigWriteAccess({
+    alreadyConfigured,
+    isStaff: isStaffUser(user),
+    providedToken:
+      (typeof body.setupToken === 'string' ? body.setupToken.trim() : '') ||
+      (req.headers.get('x-setup-token') || '').trim(),
+    expectedToken: (process.env.SETUP_TOKEN || '').trim(),
+    staffConfigured: Boolean((process.env.STAFF_DISCORD_IDS || '').trim()),
+  })
+  if (!access.ok) {
+    return Response.json({ error: access.error }, { status: access.status })
   }
 
   // Verifie les identifiants aupres de Discord (grant client_credentials) AVANT
@@ -70,9 +139,9 @@ export async function POST(req: Request) {
           grant_type: 'client_credentials',
         }).toString(),
         cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
       })
       if (!check.ok) {
-        // Mauvais Client ID / Secret : Discord repond invalid_client (400 ou 401 selon le cas).
         let discordError = ''
         try {
           discordError = ((await check.json()) as { error?: string })?.error || ''
@@ -101,14 +170,15 @@ export async function POST(req: Request) {
       create: {
         id: 'main',
         discordClientId: clientId,
-        discordClientSecret: clientSecret,
-        discordBotToken: botToken || null,
+        // Secrets chiffres en base (AES-256-GCM, cle derivee de APP_SECRET).
+        discordClientSecret: sealSecret(clientSecret),
+        discordBotToken: sealSecret(botToken || null),
       },
       update: {
         discordClientId: clientId,
-        discordClientSecret: clientSecret,
+        discordClientSecret: sealSecret(clientSecret),
         // champ envoye seulement si l'utilisateur a saisi quelque chose : sinon on conserve
-        ...(botToken !== undefined ? { discordBotToken: botToken || null } : {}),
+        ...(botToken !== undefined ? { discordBotToken: sealSecret(botToken || null) } : {}),
       },
     })
   } catch (e) {
@@ -117,13 +187,27 @@ export async function POST(req: Request) {
       ? "La base n'est pas initialisee : applique le schema (npm run db:sql | turso db shell <base>, ou colle turso-schema.sql dans la console web Turso)."
       : /no column named discordBotToken|no such column/i.test(detail)
         ? "La colonne du bot n'existe pas encore : applique la migration (console Turso) : ALTER TABLE AppConfig ADD COLUMN discordBotToken TEXT;"
-        : 'Verifie TURSO_DATABASE_URL et TURSO_AUTH_TOKEN, puis l\'etat de la base sur /api/health.'
+        : 'Verifie TURSO_DATABASE_URL et TURSO_AUTH_TOKEN, puis l’etat de la base sur /api/health.'
     console.error('[config] echec enregistrement :', detail)
     return Response.json(
       { error: `Ecriture en base impossible : ${detail}. ${hint}` },
       { status: 500 },
     )
   }
+
+  await recordAudit({
+    action: 'config.discord.save',
+    actorId: user?.id,
+    actorName: user?.username,
+    target: clientId,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+    metadata: {
+      botToken: botToken ? 'fourni' : 'conserve',
+      // Trace le mode d'autorisation (bootstrap ouvert, jeton ou staff).
+      authorization: access.via,
+    },
+  })
 
   return Response.json({ ok: true, discordConfigured: true })
 }

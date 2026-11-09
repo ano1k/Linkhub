@@ -18,6 +18,10 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     
     // React rules
     "react-hooks/exhaustive-deps": "off",
+    // Les vues du tableau de bord chargent leurs donnees au montage (fetch vers
+    // /api/*) : le motif setState-dans-useEffect est volontaire ici. Le jour ou
+    // un cache client (SWR / React Query) est branche, reactiver cette regle.
+    "react-hooks/set-state-in-effect": "off",
     "react-hooks/purity": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",

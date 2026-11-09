@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { isSealed, openSecret, sealSecret } from '@/lib/secrets'
 
 export type DiscordConfig = {
   clientId: string
@@ -46,7 +47,7 @@ export function detectPublicProto(req: Request): 'https' | 'http' {
   }
 
   const host = (req.headers.get('x-forwarded-host') || req.headers.get('host') || '').trim()
-  const isPreviewHost = /(^|\.)space-z\.ai(:|$)/i.test(host)
+  const isPreviewHost = /(^|\.)(space-z\.ai|e2b\.app|arena\.ai)(:|$)/i.test(host)
 
   const xf = req.headers.get('x-forwarded-proto')
   if (xf) {
@@ -73,6 +74,9 @@ export function detectPublicProto(req: Request): 'https' | 'http' {
 /** Port du serveur Discord simule (mock) utilise en mode demo. */
 export const MOCK_PORT = process.env.DISCORD_MOCK_PORT || '3030'
 
+/** Version affichee dans l'API et le heartbeat. */
+export const APP_VERSION = '2.0.0'
+
 /**
  * Mode demo : DISCORD_API_BASE pointe vers le serveur Discord simule (mini-services/mock-discord).
  * Dans ce mode, aucune requete ne part vers le vrai Discord : la connexion, les serveurs,
@@ -93,30 +97,62 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
   let botToken = process.env.DISCORD_BOT_TOKEN || ''
   if (isMockMode()) {
     const row = await db.appConfig.findUnique({ where: { id: 'main' } }).catch(() => null)
-    if (row?.discordBotToken) botToken = row.discordBotToken
+    if (row?.discordBotToken) botToken = openSecret(row.discordBotToken) ?? ''
     if (row?.discordClientId && row?.discordClientSecret) {
-      return { clientId: row.discordClientId, clientSecret: row.discordClientSecret, botToken }
+      return {
+        clientId: row.discordClientId,
+        clientSecret: openSecret(row.discordClientSecret) ?? '',
+        botToken,
+      }
     }
     return { clientId: 'demo-client-id', clientSecret: 'demo-client-secret', botToken }
   }
+
   let clientId = (process.env.DISCORD_CLIENT_ID || '').trim()
   let clientSecret = (process.env.DISCORD_CLIENT_SECRET || '').trim()
+
   try {
     const row = await db.appConfig.findUnique({ where: { id: 'main' } })
-    if (row?.discordClientId) clientId = row.discordClientId.trim()
-    if (row?.discordClientSecret) clientSecret = row.discordClientSecret.trim()
+    if (row) {
+      if (row.discordClientId) clientId = row.discordClientId.trim()
+      if (row.discordClientSecret) clientSecret = (openSecret(row.discordClientSecret) ?? '').trim()
+      if (row.discordBotToken) botToken = openSecret(row.discordBotToken) ?? ''
+      // Migration progressive : les secrets stockes en clair sont re-chiffres en
+      // arriere-plan, sans bloquer l'appel (et sans jamais echouer la requete).
+      void sealLegacyAppConfigSecrets(row)
+    }
   } catch {
-    // base non initialisee : on retombe sur les variables d'environnement
-  }
-  try {
-    const rows = await db.$queryRawUnsafe<{ discordBotToken: string | null }[]>(
-      'SELECT discordBotToken FROM AppConfig WHERE id = \'main\'',
-    )
-    if (Array.isArray(rows) && rows[0]?.discordBotToken) botToken = rows[0].discordBotToken
-  } catch {
-    // colonne discordBotToken absente (migration pas encore appliquee) : on ignore
+    // Base ancienne : la colonne discordBotToken peut manquer. On tente une lecture
+    // brute (ce chemin disparaitra une fois la migration appliquee partout).
+    try {
+      const rows = await db.$queryRawUnsafe<{ discordBotToken: string | null }[]>(
+        "SELECT discordBotToken FROM AppConfig WHERE id = 'main'",
+      )
+      const raw = Array.isArray(rows) ? rows[0]?.discordBotToken : null
+      if (raw) botToken = openSecret(raw) ?? ''
+    } catch {
+      // base non initialisee : on garde les variables d'environnement
+    }
   }
   return { clientId, clientSecret, botToken }
+}
+
+/** Re-chiffre en tache de fond les secrets encore stockes en clair (legacy). */
+async function sealLegacyAppConfigSecrets(row: {
+  discordClientSecret?: string | null
+  discordBotToken?: string | null
+}): Promise<void> {
+  const data: { discordClientSecret?: string; discordBotToken?: string } = {}
+  if (row.discordClientSecret && !isSealed(row.discordClientSecret)) {
+    const sealed = sealSecret(row.discordClientSecret)
+    if (sealed) data.discordClientSecret = sealed
+  }
+  if (row.discordBotToken && !isSealed(row.discordBotToken)) {
+    const sealed = sealSecret(row.discordBotToken)
+    if (sealed) data.discordBotToken = sealed
+  }
+  if (Object.keys(data).length === 0) return
+  await db.appConfig.update({ where: { id: 'main' }, data }).catch(() => {})
 }
 
 /**
@@ -126,6 +162,10 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
  */
 export function buildBotInviteUrl(clientId: string, guildId?: string): string {
   if (!clientId) return ''
+  // Mode demo : le bot est ajoute via le mock Discord, sans quitter la preview.
+  if (isMockMode()) {
+    return guildId ? `/api/mock/bot-invite?guild_id=${guildId}` : '/api/mock/bot-invite'
+  }
   const url = new URL('https://discord.com/oauth2/authorize')
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('scope', 'bot')

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'arena/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+# Une nouvelle poussée annule les exécutions encore en cours sur la même référence.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint · Types · Tests · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Base SQLite de CI : suffit pour générer le client Prisma et vérifier le build.
+      DATABASE_URL: file:./db/custom.db
+      # Secret de test : jamais utilisé en production.
+      APP_SECRET: ci-secret-ci-secret-ci-secret-1234
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # `postinstall` lance `prisma generate` (accès à binaries.prisma.sh requis).
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Appliquer le schéma sur la base de test
+        run: npx prisma db push --skip-generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Tests unitaires
+        run: npm test
+
+      - name: Build de production
+        run: npm run build
